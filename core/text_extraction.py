@@ -19,10 +19,11 @@ Key design decisions:
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-import pdfplumber
+import fitz  # PyMuPDF
 
 from config.settings import (
     PAPERS_DIR,
@@ -34,7 +35,6 @@ from utils.helpers import (
     generate_paper_id_map,
     save_json,
     load_json,
-    compute_file_hash,
     get_paper_id,
 )
 
@@ -128,20 +128,22 @@ class TextExtractor:
         """
         Return extracted text, using cached version if the file hasn't changed.
 
-        Cache key is the file's content hash (MD5).  If the hash matches
-        a previous extraction, we return the cached text immediately.
+        Cache key is the paper_id. Cache is invalidated based on file modification time.
         """
-        # Use the LEGACY paper ID (filename-based) as cache key so file renames
-        # don't invalidate cache unnecessarily.
         cache_key = get_paper_id(file_path.name)
         cache_file = self.cache_dir / f"{cache_key}.json"
-        file_hash = compute_file_hash(file_path)
+        
+        # Use modification time instead of hashing for performance
+        try:
+            mtime = os.path.getmtime(file_path)
+        except OSError:
+            mtime = 0
 
         # Check cache validity
         if cache_file.exists():
             try:
                 cached = load_json(cache_file)
-                if cached.get("hash") == file_hash:
+                if cached.get("mtime") == mtime:
                     logger.debug("Cache hit for %s (%s)", paper_id, file_path.name)
                     return cached["text"]
             except Exception:
@@ -150,9 +152,12 @@ class TextExtractor:
         # Extract fresh based on file extension
         text = self._extract_file(file_path)
 
-        # Save to cache
-        save_json({"hash": file_hash, "text": text}, cache_file)
-        logger.debug("Cached extraction for %s (%s)", paper_id, file_path.name)
+        # Save to cache (may fail on OneDrive due to sync timeouts)
+        try:
+            save_json({"mtime": mtime, "text": text}, cache_file)
+            logger.debug("Cached extraction for %s (%s)", paper_id, file_path.name)
+        except (TimeoutError, OSError) as e:
+            logger.warning("Cache write failed for %s: %s", paper_id, e)
 
         return text
 
@@ -178,9 +183,10 @@ class TextExtractor:
 
     def _extract_pdf(self, pdf_path: Path) -> str:
         """
-        Extract text from a PDF file using pdfplumber.
+        Extract text from a PDF file using PyMuPDF (fitz).
+        Significantly faster than pdfplumber.
 
-        Concatenates text from each page, separated by newlines.
+        Concatenates text from each page.
         Respects the max_pages limit if configured.
 
         Args:
@@ -191,10 +197,11 @@ class TextExtractor:
         """
         pages_text: List[str] = []
         try:
-            with pdfplumber.open(pdf_path) as pdf:
-                page_limit = self.max_pages or len(pdf.pages)
-                for page in pdf.pages[:page_limit]:
-                    text = page.extract_text()
+            with fitz.open(pdf_path) as pdf:
+                page_limit = self.max_pages or len(pdf)
+                for page_num in range(min(page_limit, len(pdf))):
+                    page = pdf[page_num]
+                    text = page.get_text()
                     if text:
                         pages_text.append(text)
         except Exception as e:

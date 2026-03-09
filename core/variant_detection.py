@@ -276,37 +276,46 @@ class VariantDetector:
 
             # Collect all terms: the name itself + synonyms
             raw_terms = [name] + synonyms
-            processed_terms = []
+            processed_patterns = []
             for term in raw_terms:
                 processed = self.preprocessor.preprocess_variant_term(term)
                 if processed:
-                    processed_terms.append(processed)
+                    # Precompile regex for performance
+                    escaped_term = re.escape(processed)
+                    # Add word boundaries to avoid partial word matches
+                    pattern = re.compile(rf"\b{escaped_term}\b")
+                    processed_patterns.append(pattern)
 
-            self._search_index[unique_key] = processed_terms
+            self._search_index[unique_key] = processed_patterns
 
         logger.debug(
             "Search index built: %d variants, %d total terms",
             len(self._search_index),
-            sum(len(t) for t in self._search_index.values()),
+            sum(len(patterns) for patterns in self._search_index.values()),
         )
 
-    def _check_terms(self, text: str, terms: List[str]) -> bool:
+    def _check_terms(self, text: str, compiled_patterns: List[re.Pattern]) -> bool:
         """
-        Check if any term from the list appears in the text at least
+        Check if any pattern from the list appears in the text at least
         `threshold` times.
 
-        Uses simple substring search — fast and sufficient for
-        moderate-length texts (research paper scale).
+        Uses precompiled regex patterns to improve performance significantly
+        over repeated substring or raw regex searching.
         """
         total_count = 0
-        for term in terms:
-            if not term:
-                continue
-            count = text.count(term)
-            total_count += count
-            # Early exit if threshold is met
-            if total_count >= self.threshold:
-                return True
+        for pattern in compiled_patterns:
+            # Check threshold quickly. If threshold is 1, a simple search is faster.
+            if self.threshold == 1:
+                if pattern.search(text):
+                    return True
+            else:
+                # finditer is generally faster than findall for just counting matches
+                count = sum(1 for _ in pattern.finditer(text))
+                total_count += count
+                # Early exit if threshold is met
+                if total_count >= self.threshold:
+                    return True
+                    
         return total_count >= self.threshold
 
     def _load_variants(self) -> List[Dict[str, Any]]:

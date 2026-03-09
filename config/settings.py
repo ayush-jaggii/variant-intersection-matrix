@@ -11,10 +11,16 @@ Architecture note:
 """
 
 import os
+import sys
 from pathlib import Path
 
 # ─── Project Root ────────────────────────────────────────────────────────────
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+    # We are running in a PyInstaller bundle
+    PROJECT_ROOT = Path(sys._MEIPASS)
+else:
+    # We are running in a normal Python environment
+    PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # ─── Data Directories ───────────────────────────────────────────────────────
 DATA_DIR = PROJECT_ROOT / "data"
@@ -43,6 +49,10 @@ PAPER_VARIANT_MATRIX_CSV = "paper_variant_matrix.csv"
 VARIANT_INTERSECTION_MATRIX_CSV = "variant_intersection_matrix.csv"
 PAIR_DETAILS_CSV = "pair_details.csv"
 MANUAL_OVERRIDES_FILE = CACHE_DIR / "manual_overrides.json"
+
+# Manual pair validation overrides (variant combos confirmed by researcher)
+# Format: {"paper_id": [["variant_a", "variant_b"], ...]}
+PAIR_OVERRIDES_FILE = CACHE_DIR / "pair_overrides.json"
 
 # ─── Paper Configuration ────────────────────────────────────────────────────
 # Supported file types for research papers

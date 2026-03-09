@@ -27,6 +27,37 @@ How Dimension Exclusion Works:
     dimension_map[v1] == dimension_map[v2] is marked as excluded.
     This is because variants within the same dimension are mutually
     exclusive categories — pairing them is logically invalid.
+
+Manual Validation (Single Variant):
+    Researchers can override auto-detection for individual variant-paper
+    cells.  Overrides are stored as {paper_id: {variant: bool}} in
+    manual_overrides.json and applied to the paper-variant matrix before
+    the intersection matrix is computed.
+
+Manual Validation (Variant Pairs):
+    Researchers can also confirm that a specific paper discusses a
+    combination of two variants.  These pair overrides are stored as
+    {paper_id: [["variant_a", "variant_b"], ...]} in pair_overrides.json.
+
+    When pair overrides exist, they affect the matrices as follows:
+      1. Both individual variants are forced to "present" (1) in the
+         paper-variant matrix for that paper.
+      2. The intersection matrix is recomputed to reflect the updated
+         binary matrix, so the pair count increases accordingly.
+
+    This ensures the exported CSVs (paper_variant_matrix.csv,
+    variant_intersection_matrix.csv, pair_details.csv) always include
+    manual validations — no separate re-run is needed.
+
+Live Updates:
+    When a user saves a new override (single or pair), the method
+    `apply_overrides_and_recompute()` is called to:
+      1. Apply all single-variant overrides to the paper-variant matrix
+      2. Apply all pair overrides (force both variants to present)
+      3. Recompute the intersection matrix
+      4. Re-export CSVs
+    This keeps all views and downloads consistent without requiring
+    a full re-run of the analysis.
 """
 
 import logging
@@ -43,8 +74,10 @@ from config.settings import (
     VARIANT_INTERSECTION_MATRIX_CSV,
     PAIR_DETAILS_CSV,
     MANUAL_OVERRIDES_FILE,
+    PAIR_OVERRIDES_FILE,
 )
 from utils.helpers import load_json, save_json
+import streamlit as st
 
 logger = logging.getLogger(__name__)
 
@@ -53,23 +86,82 @@ logger = logging.getLogger(__name__)
 EXCLUDED_PAIR_VALUE = -1
 
 
+@st.cache_data(show_spinner=False)
+def _cached_build_base_matrix(
+    detection_results: Dict[str, Dict[str, bool]], variant_names: List[str]
+) -> pd.DataFrame:
+    """Build the raw paper x variant matrix, cached to avoid recomputation."""
+    rows = {}
+    for paper_id, variant_presence in detection_results.items():
+        rows[paper_id] = {v: int(variant_presence.get(v, False)) for v in variant_names}
+
+    df = pd.DataFrame.from_dict(rows, orient="index", columns=variant_names)
+    df.index.name = "paper_id"
+    return df.sort_index()
+
+
+@st.cache_data(show_spinner=False)
+def _cached_compute_intersection(
+    paper_variant_df: pd.DataFrame, dimension_map: Dict[str, str]
+) -> pd.DataFrame:
+    """Compute the intersection matrix and apply dimension masking, cached for speed."""
+    M = paper_variant_df.values.astype(np.int32)
+    raw_intersection = M.T @ M
+
+    variant_names = list(paper_variant_df.columns)
+    result = pd.DataFrame(
+        raw_intersection,
+        index=variant_names,
+        columns=variant_names,
+    )
+
+    if dimension_map:
+        n = len(variant_names)
+        for i in range(n):
+            for j in range(i + 1, n):
+                vi = variant_names[i]
+                vj = variant_names[j]
+                dim_i = dimension_map.get(vi, "")
+                dim_j = dimension_map.get(vj, "")
+                if dim_i and dim_j and dim_i == dim_j:
+                    result.iloc[i, j] = EXCLUDED_PAIR_VALUE
+                    result.iloc[j, i] = EXCLUDED_PAIR_VALUE
+    return result
+
+
 class MatrixComputer:
     """
     Builds the paper-variant binary matrix and computes the intersection matrix.
 
+    Supports two kinds of manual overrides:
+        1. Single-variant overrides:  {paper_id: {variant: bool}}
+           → Force a variant to present/absent for a specific paper.
+
+        2. Pair overrides:  {paper_id: [["variant_a", "variant_b"], ...]}
+           → Confirm that a specific paper discusses both variants together.
+           → Implicitly forces both variants to "present" for that paper.
+
+    Both override types are persisted to disk and automatically included
+    in all matrix computations and CSV exports.
+
     Attributes:
-        paper_variant_df:  DataFrame with papers as rows, variants as columns.
-        intersection_df:   Symmetric DataFrame of variant-pair intersection counts.
-                           Same-dimension cells contain EXCLUDED_PAIR_VALUE (-1).
-        dimension_map:     Dict mapping variant_name → dimension_name.
+        paper_variant_df:        DataFrame with papers as rows, variants as columns.
+        intersection_df:         Symmetric DataFrame of variant-pair intersection counts.
+                                 Same-dimension cells contain EXCLUDED_PAIR_VALUE (-1).
+        dimension_map:           Dict mapping variant_name → dimension_name.
+        _detection_results_raw:  Original detection results (before overrides).
     """
 
     def __init__(self):
         self.paper_variant_df: Optional[pd.DataFrame] = None
         self.intersection_df: Optional[pd.DataFrame] = None
         self.dimension_map: Dict[str, str] = {}
+        self._detection_results_raw: Optional[Dict[str, Dict[str, bool]]] = None
+        self._variant_names: List[str] = []
         self._manual_overrides: Dict[str, Dict[str, bool]] = {}
+        self._pair_overrides: Dict[str, List[List[str]]] = {}
         self._load_overrides()
+        self._load_pair_overrides()
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -94,21 +186,23 @@ class MatrixComputer:
             len(detection_results), len(variant_names),
         )
 
-        # Construct matrix row by row
-        rows = {}
-        for paper_id, variant_presence in detection_results.items():
-            row = {v: int(variant_presence.get(v, False)) for v in variant_names}
-            rows[paper_id] = row
+        # Store raw results so we can re-apply overrides later without
+        # cumulative drift
+        self._detection_results_raw = detection_results
+        self._variant_names = variant_names
 
-        df = pd.DataFrame.from_dict(rows, orient="index", columns=variant_names)
-        df.index.name = "paper_id"
-        df = df.sort_index()
+        # Use cached function for the heavy base computation
+        df = _cached_build_base_matrix(detection_results, variant_names)
 
         # Apply manual overrides (researcher corrections)
-        df = self._apply_overrides(df)
+        # We apply these ON TOP of the cached result, so overrides are never cached
+        # but re-runs without changes are extremely fast.
+        df = self._apply_overrides(df.copy())
+        # Apply pair overrides (force both variants to present)
+        df = self._apply_pair_overrides(df)
 
         self.paper_variant_df = df
-        logger.info("Paper–variant matrix shape: %s", df.shape)
+        logger.info("Paper-variant matrix shape: %s", df.shape)
         return df
 
     def compute_intersection_matrix(
@@ -143,36 +237,48 @@ class MatrixComputer:
         if self.paper_variant_df is None:
             raise ValueError("Paper-variant matrix has not been built yet.")
 
-        # Step 1: Raw intersection via matrix multiplication
-        M = self.paper_variant_df.values.astype(np.int32)
-        raw_intersection = M.T @ M
-
-        variant_names = list(self.paper_variant_df.columns)
-        result = pd.DataFrame(
-            raw_intersection,
-            index=variant_names,
-            columns=variant_names,
+        # Use cached function for the heavy intersection computation
+        result = _cached_compute_intersection(
+            self.paper_variant_df, 
+            self.dimension_map or {}
         )
-
-        # Step 2: Apply dimension masking
-        # If two variants belong to the same dimension, set their
-        # intersection cell to EXCLUDED_PAIR_VALUE (-1).
-        if self.dimension_map:
-            n = len(variant_names)
-            for i in range(n):
-                for j in range(i + 1, n):
-                    vi = variant_names[i]
-                    vj = variant_names[j]
-                    dim_i = self.dimension_map.get(vi, "")
-                    dim_j = self.dimension_map.get(vj, "")
-                    if dim_i and dim_j and dim_i == dim_j:
-                        # Symmetric exclusion
-                        result.iloc[i, j] = EXCLUDED_PAIR_VALUE
-                        result.iloc[j, i] = EXCLUDED_PAIR_VALUE
 
         self.intersection_df = result
         logger.info("Intersection matrix computed: %s", result.shape)
         return result
+
+    def apply_overrides_and_recompute(self):
+        """
+        Re-apply all overrides and recompute both matrices from the
+        original detection results.
+
+        This is the method called after saving a new manual override
+        (single-variant or pair) to get a live update without re-running
+        the full analysis.  It also re-exports CSVs.
+
+        Flow:
+            1. Rebuild paper-variant matrix from raw detection results
+            2. Apply single-variant overrides
+            3. Apply pair overrides (force both variants to present)
+            4. Recompute intersection matrix with dimension masking
+            5. Re-export all CSV files
+
+        This ensures all views, drill-downs, and downloads reflect
+        the latest manual validations immediately.
+        """
+        if self._detection_results_raw is None or not self._variant_names:
+            logger.warning("Cannot recompute — no raw detection results stored")
+            return
+
+        # Step 1-3: Rebuild paper-variant with overrides
+        self.build_paper_variant_matrix(
+            self._detection_results_raw, self._variant_names
+        )
+        # Step 4: Recompute intersection
+        self.compute_intersection_matrix()
+        # Step 5: Re-export
+        self.export_all()
+        logger.info("Matrices recomputed and CSVs re-exported after override change")
 
     def get_papers_for_pair(
         self,
@@ -350,11 +456,14 @@ class MatrixComputer:
 
         return stats
 
-    # ── Manual Overrides ─────────────────────────────────────────────────
+    # ── Manual Overrides (Single Variant) ─────────────────────────────────
 
     def set_override(self, paper_id: str, variant_name: str, value: bool):
         """
         Manually override a paper-variant detection result.
+
+        After saving, `apply_overrides_and_recompute()` should be called
+        to get a live update of both matrices and CSV exports.
 
         Args:
             paper_id: Paper identifier (P1, P2, ...).
@@ -379,16 +488,106 @@ class MatrixComputer:
         """Return all manual overrides."""
         return self._manual_overrides.copy()
 
+    # ── Manual Overrides (Variant Pairs) ──────────────────────────────────
+    #
+    # How Pair Validation Works:
+    #   When a researcher confirms that paper P12 discusses *both*
+    #   "Product Leasing" and "Recycling" together, we store:
+    #       pair_overrides["P12"] = [["Product Leasing", "Recycling"]]
+    #
+    #   During matrix computation:
+    #     1. Both "Product Leasing" and "Recycling" are forced to 1 for P12
+    #        in the paper-variant matrix.
+    #     2. When the intersection matrix is recomputed (M.T @ M), cell
+    #        (Product Leasing, Recycling) increases by 1.
+    #     3. Because the binary matrix is the source of truth, ALL derived
+    #        outputs (CSVs, pair details, research gaps) automatically
+    #        reflect the pair validation.
+    #
+    #   This approach avoids maintaining a separate "pair override counter"
+    #   and keeps the single paper-variant matrix as the sole data source.
+
+    def set_pair_override(
+        self,
+        paper_id: str,
+        variant_a: str,
+        variant_b: str,
+    ):
+        """
+        Manually validate that a paper discusses a pair of variants.
+
+        This forces both variants to "present" for the given paper and
+        recomputes the intersection matrix so the pair count increases.
+
+        Pair overrides are persisted to pair_overrides.json and survive
+        across sessions and re-runs.
+
+        Args:
+            paper_id:  Paper identifier (P1, P2, ...).
+            variant_a: First variant name.
+            variant_b: Second variant name.
+        """
+        if paper_id not in self._pair_overrides:
+            self._pair_overrides[paper_id] = []
+
+        # Avoid duplicates (normalize order for comparison)
+        pair = sorted([variant_a, variant_b])
+        for existing in self._pair_overrides[paper_id]:
+            if sorted(existing) == pair:
+                logger.info("Pair override already exists: %s × %s in %s",
+                            variant_a, variant_b, paper_id)
+                return
+
+        self._pair_overrides[paper_id].append([variant_a, variant_b])
+        self._save_pair_overrides()
+        logger.info("Pair override set: %s × %s in %s", variant_a, variant_b, paper_id)
+
+    def remove_pair_override(
+        self,
+        paper_id: str,
+        variant_a: str,
+        variant_b: str,
+    ):
+        """Remove a specific pair override."""
+        if paper_id not in self._pair_overrides:
+            return
+
+        pair = sorted([variant_a, variant_b])
+        self._pair_overrides[paper_id] = [
+            p for p in self._pair_overrides[paper_id]
+            if sorted(p) != pair
+        ]
+        if not self._pair_overrides[paper_id]:
+            del self._pair_overrides[paper_id]
+        self._save_pair_overrides()
+
+    def get_pair_overrides(self) -> Dict[str, List[List[str]]]:
+        """Return all pair overrides."""
+        return self._pair_overrides.copy()
+
+    def clear_all_pair_overrides(self):
+        """Remove all pair overrides."""
+        self._pair_overrides = {}
+        self._save_pair_overrides()
+
     # ── Export ────────────────────────────────────────────────────────────
+    #
+    # CSV exports always reflect the current state of the matrices,
+    # which already include manual overrides (both single-variant and
+    # pair overrides).  No extra step is needed — the overrides are
+    # baked into paper_variant_df before the intersection is computed.
 
     def export_all(self, output_dir: Path = OUTPUT_DIR):
         """
         Export all CSV files to the output directory.
 
         Files generated:
-            • paper_variant_matrix.csv
-            • variant_intersection_matrix.csv
-            • pair_details.csv  (excludes same-dimension pairs)
+            • paper_variant_matrix.csv  (includes manual overrides)
+            • variant_intersection_matrix.csv  (includes manual overrides)
+            • pair_details.csv  (excludes same-dimension pairs, includes overrides)
+
+        All files reflect the current matrix state, which already
+        incorporates both single-variant and pair manual validations.
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -414,7 +613,7 @@ class MatrixComputer:
     # ── Internal ─────────────────────────────────────────────────────────
 
     def _apply_overrides(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Apply manual overrides to the paper-variant matrix."""
+        """Apply single-variant manual overrides to the paper-variant matrix."""
         for paper_id, overrides in self._manual_overrides.items():
             if paper_id in df.index:
                 for variant_name, value in overrides.items():
@@ -422,13 +621,44 @@ class MatrixComputer:
                         df.at[paper_id, variant_name] = int(value)
         return df
 
+    def _apply_pair_overrides(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Apply pair overrides to the paper-variant matrix.
+
+        How this works:
+            For each pair override {paper_id: [["A", "B"]]}, we set
+            df.at[paper_id, "A"] = 1  and  df.at[paper_id, "B"] = 1.
+
+            By forcing both variants to "present" in the binary matrix,
+            the intersection (M.T @ M) naturally picks up the pair.
+            No separate intersection adjustment is needed.
+        """
+        for paper_id, pairs in self._pair_overrides.items():
+            if paper_id in df.index:
+                for pair in pairs:
+                    for variant in pair:
+                        if variant in df.columns:
+                            df.at[paper_id, variant] = 1
+        return df
+
     def _load_overrides(self):
-        """Load manual overrides from disk."""
+        """Load single-variant manual overrides from disk."""
         try:
             self._manual_overrides = load_json(MANUAL_OVERRIDES_FILE)
         except (FileNotFoundError, Exception):
             self._manual_overrides = {}
 
     def _save_overrides(self):
-        """Persist manual overrides to disk."""
+        """Persist single-variant manual overrides to disk."""
         save_json(self._manual_overrides, MANUAL_OVERRIDES_FILE)
+
+    def _load_pair_overrides(self):
+        """Load pair validation overrides from disk."""
+        try:
+            self._pair_overrides = load_json(PAIR_OVERRIDES_FILE)
+        except (FileNotFoundError, Exception):
+            self._pair_overrides = {}
+
+    def _save_pair_overrides(self):
+        """Persist pair validation overrides to disk."""
+        save_json(self._pair_overrides, PAIR_OVERRIDES_FILE)

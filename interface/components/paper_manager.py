@@ -109,7 +109,7 @@ def _handle_uploads(uploaded_files) -> None:
     if saved_count > 0:
         st.success(f"Uploaded {saved_count} paper(s) successfully.")
     if skipped_count > 0:
-        st.info(f"Skipped {skipped_count} paper(s) — already exist.")
+        st.info(f"Skipped {skipped_count} paper(s) - already exist.")
 
 
 def _render_paper_row(paper_path: Path, paper_id: str) -> None:

@@ -27,8 +27,12 @@ from interface.components.variant_manager import (
     render_variant_manager,
     get_variant_count,
     get_dimension_count,
+    _load_variants,
 )
-from interface.components.analysis_runner import render_analysis_runner
+from interface.components.analysis_runner import (
+    render_analysis_runner,
+    _check_and_load_results,
+)
 from interface.components.matrix_viewer import render_matrix_viewer
 
 # ── Logging Setup ────────────────────────────────────────────────────────
@@ -51,6 +55,15 @@ st.set_page_config(
 
 # ── Inject Design System ─────────────────────────────────────────────────
 st.markdown(get_theme_css(), unsafe_allow_html=True)
+
+# ── Check for background analysis results on every rerun ─────────────────
+# This ensures results are picked up even when the user is on another tab.
+_check_and_load_results()
+
+# ── Load variants on startup if not already loaded ──────────────────────────
+# Prevents the "Run Analysis" tab from requiring a visit to the "Variants" tab first
+if "variants" not in st.session_state:
+    st.session_state.variants = _load_variants()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -94,16 +107,23 @@ with st.sidebar:
     variant_count = get_variant_count()
     dimension_count = get_dimension_count()
     analysis_done = st.session_state.get("analysis_complete", False)
+    analysis_running = st.session_state.get("analysis_running", False)
+
+    if analysis_running:
+        analysis_icon = "sync"
+        analysis_text = "Running"
+    elif analysis_done:
+        analysis_icon = "check_circle"
+        analysis_text = "Complete"
+    else:
+        analysis_icon = "sync"
+        analysis_text = "Pending"
 
     status_items = [
         ("description", "Papers", str(paper_count)),
         ("category", "Dimensions", str(dimension_count)),
         ("biotech", "Variants", str(variant_count)),
-        (
-            "check_circle" if analysis_done else "sync",
-            "Analysis",
-            "Complete" if analysis_done else "Pending",
-        ),
+        (analysis_icon, "Analysis", analysis_text),
     ]
 
     for ico, label, value in status_items:

@@ -77,6 +77,8 @@ pip install -r requirements.txt
 
 ### 2. Launch the Application
 
+**Option A: Run Python Script**
+
 ```bash
 python run.py
 ```
@@ -86,6 +88,16 @@ Or directly with Streamlit:
 ```bash
 streamlit run interface/app.py
 ```
+
+**Option B: Standalone Executable**
+
+To build a standalone executable (no Python installation required for end users) using PyInstaller:
+
+```bash
+python build_executable.py
+```
+
+The compiled application will be available in the `dist_release/` directory as `VIM_Analyzer`.
 
 ### 3. Use the Application
 
