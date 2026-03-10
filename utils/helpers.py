@@ -195,7 +195,7 @@ def compute_file_hash(filepath: Path, algorithm: str = "md5") -> str:
 #
 #   {
 #     "Dimension Name": {
-#       "Variant Name": ["synonym1", "synonym2", ...]
+#       "Variant Name": ["alternate_name1", "alternate_name2", ...]
 #     }
 #   }
 #
@@ -205,7 +205,7 @@ def compute_file_hash(filepath: Path, algorithm: str = "md5") -> str:
 
 def _sanitize_text(text: str) -> str:
     """
-    Sanitize a dimension/variant/synonym name by removing non-ASCII characters.
+    Sanitize a dimension/variant/alternate_name name by removing non-ASCII characters.
 
     This guards against byte-level corruption (e.g., OneDrive sync issues)
     that can inject CJK or other unexpected Unicode characters into what
@@ -227,15 +227,15 @@ def _sanitize_text(text: str) -> str:
 
 def parse_variants_from_csv(file_content: str) -> Dict[str, Dict[str, List[str]]]:
     """
-    Parse dimension/variant/synonym definitions from CSV text.
+    Parse dimension/variant/alternate_name definitions from CSV text.
 
-    Expected CSV columns: dimension, variant, synonym
+    Expected CSV columns: dimension, variant, alternate_name
 
-    Each row adds one synonym to a (dimension, variant) pair.
-    Multiple rows with the same dimension+variant accumulate synonyms.
+    Each row adds one alternate_name to a (dimension, variant) pair.
+    Multiple rows with the same dimension+variant accumulate alternate_names.
 
     Example CSV:
-        dimension,variant,synonym
+        dimension,variant,alternate_name
         Product Energy Consumption,Energy Consuming,energy consuming
         Product Energy Consumption,Energy Consuming,electric powered
         Product Requirement,Temporary,temporary use
@@ -258,12 +258,12 @@ def parse_variants_from_csv(file_content: str) -> Dict[str, Dict[str, List[str]]
     # Create a mapping of lowercase fieldname → original fieldname
     field_map = {f.strip().lower(): f for f in reader.fieldnames}
 
-    required = {"dimension", "variant", "synonym"}
+    required = {"dimension", "variant", "alternate_name"}
     if not required.issubset(field_map.keys()):
         missing = required - set(field_map.keys())
         raise ValueError(
             f"CSV is missing required columns: {missing}. "
-            f"Expected: dimension, variant, synonym"
+            f"Expected: dimension, variant, alternate_name"
         )
 
     dimensions: Dict[str, Dict[str, List[str]]] = {}
@@ -271,7 +271,7 @@ def parse_variants_from_csv(file_content: str) -> Dict[str, Dict[str, List[str]]
         # Access using original field names mapped from lowercase
         dim = _sanitize_text(row[field_map["dimension"]].strip())
         var = _sanitize_text(row[field_map["variant"]].strip())
-        syn = _sanitize_text(row[field_map["synonym"]].strip())
+        syn = _sanitize_text(row[field_map["alternate_name"]].strip())
 
         if not dim or not var:
             continue  # Skip rows with empty dimension or variant
@@ -288,9 +288,9 @@ def parse_variants_from_csv(file_content: str) -> Dict[str, Dict[str, List[str]]
 
 def parse_variants_from_excel(file_bytes: bytes) -> Dict[str, Dict[str, List[str]]]:
     """
-    Parse dimension/variant/synonym definitions from an Excel file (.xlsx).
+    Parse dimension/variant/alternate_name definitions from an Excel file (.xlsx).
 
-    Same column expectations as CSV: dimension, variant, synonym.
+    Same column expectations as CSV: dimension, variant, alternate_name.
 
     Args:
         file_bytes: Raw bytes of the uploaded Excel file.
@@ -309,19 +309,19 @@ def parse_variants_from_excel(file_bytes: bytes) -> Dict[str, Dict[str, List[str
     # Normalize column names
     df.columns = [c.strip().lower() for c in df.columns]
 
-    required = {"dimension", "variant", "synonym"}
+    required = {"dimension", "variant", "alternate_name"}
     if not required.issubset(set(df.columns)):
         missing = required - set(df.columns)
         raise ValueError(
             f"Excel file is missing required columns: {missing}. "
-            f"Expected: dimension, variant, synonym"
+            f"Expected: dimension, variant, alternate_name"
         )
 
     dimensions: Dict[str, Dict[str, List[str]]] = {}
     for _, row in df.iterrows():
         dim = _sanitize_text(str(row["dimension"]).strip())
         var = _sanitize_text(str(row["variant"]).strip())
-        syn = _sanitize_text(str(row["synonym"]).strip())
+        syn = _sanitize_text(str(row["alternate_name"]).strip())
 
         if not dim or not var or dim == "nan" or var == "nan":
             continue
@@ -338,7 +338,7 @@ def parse_variants_from_excel(file_bytes: bytes) -> Dict[str, Dict[str, List[str
 
 def parse_variants_from_json(file_content: str) -> Dict[str, Dict[str, List[str]]]:
     """
-    Parse dimension/variant/synonym definitions from a JSON string.
+    Parse dimension/variant/alternate_name definitions from a JSON string.
 
     Accepts two formats:
 
@@ -346,7 +346,7 @@ def parse_variants_from_json(file_content: str) -> Dict[str, Dict[str, List[str]
         {
           "dimensions": {
             "Dimension Name": {
-              "Variant Name": ["synonym1", "synonym2"]
+              "Variant Name": ["alternate_name1", "alternate_name2"]
             }
           }
         }
@@ -354,7 +354,7 @@ def parse_variants_from_json(file_content: str) -> Dict[str, Dict[str, List[str]
     Format B (legacy, flat list — auto-assigns "Uncategorized" dimension):
         {
           "variants": [
-            {"name": "Variant", "synonyms": ["syn1", "syn2"]}
+            {"name": "Variant", "alternate_names": ["syn1", "syn2"]}
           ]
         }
 
@@ -394,7 +394,7 @@ def parse_variants_from_json(file_content: str) -> Dict[str, Dict[str, List[str]
         for v in legacy_list:
             dim = _sanitize_text(v.get("dimension", "Uncategorized"))
             name = _sanitize_text(v["name"])
-            syns = [_sanitize_text(s) for s in v.get("synonyms", []) if _sanitize_text(s)]
+            syns = [_sanitize_text(s) for s in v.get("alternate_names", []) if _sanitize_text(s)]
             if not dim or not name:
                 continue
             if dim not in dimensions:
@@ -408,7 +408,7 @@ def parse_variants_from_json(file_content: str) -> Dict[str, Dict[str, List[str]
         for v in data:
             dim = _sanitize_text(v.get("dimension", "Uncategorized"))
             name = _sanitize_text(v["name"])
-            syns = [_sanitize_text(s) for s in v.get("synonyms", []) if _sanitize_text(s)]
+            syns = [_sanitize_text(s) for s in v.get("alternate_names", []) if _sanitize_text(s)]
             if not dim or not name:
                 continue
             if dim not in dimensions:
@@ -427,7 +427,7 @@ def dimensions_to_flat_list(
     """
     Convert the canonical dimension dict into a flat list for UI iteration.
 
-    Each item: {"dimension": str, "name": str, "synonyms": list[str]}
+    Each item: {"dimension_id": str, "dimension": str, "variant_id": str, "name": str, "alternate_names": list[str]}
 
     Useful for the VariantDetector which iterates over individual variants.
 
@@ -435,21 +435,33 @@ def dimensions_to_flat_list(
         dimensions: Canonical dimension dict.
 
     Returns:
-        Flat list of variant definitions, each tagged with its dimension.
+        Flat list of variant definitions, each tagged with its dimension, dimension_id, and variant_id.
     """
     flat = []
+    dim_counter = 1
+    var_counter = 1
     for dim_name, variants in dimensions.items():
         clean_dim = _sanitize_text(dim_name)
         if not clean_dim:
             continue
-        for var_name, synonyms in variants.items():
+            
+        dim_id = f"D{dim_counter}"
+        dim_counter += 1
+        
+        for var_name, alternate_names in variants.items():
             clean_var = _sanitize_text(var_name)
             if not clean_var:
                 continue
+                
+            var_id = f"V{var_counter}"
+            var_counter += 1
+            
             flat.append({
+                "dimension_id": dim_id,
                 "dimension": clean_dim,
+                "variant_id": var_id,
                 "name": clean_var,
-                "synonyms": [_sanitize_text(s) for s in synonyms if _sanitize_text(s)],
+                "alternate_names": [_sanitize_text(s) for s in alternate_names if _sanitize_text(s)],
             })
     return flat
 
@@ -463,7 +475,7 @@ def flat_list_to_dimensions(
     Inverse of dimensions_to_flat_list().
 
     Args:
-        flat_list: List of {"dimension": ..., "name": ..., "synonyms": [...]}.
+        flat_list: List of {"dimension": ..., "name": ..., "alternate_names": [...]}.
 
     Returns:
         Canonical dimension dict.
@@ -472,7 +484,7 @@ def flat_list_to_dimensions(
     for v in flat_list:
         dim = v.get("dimension", "Uncategorized")
         name = v["name"]
-        syns = v.get("synonyms", [])
+        syns = v.get("alternate_names", [])
         if dim not in dimensions:
             dimensions[dim] = {}
         dimensions[dim][name] = list(syns)

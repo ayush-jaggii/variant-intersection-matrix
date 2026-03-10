@@ -23,6 +23,7 @@ from interface.design import section_header, sub_header, icon
 def render_paper_manager():
     """Render the Paper Management section of the UI."""
     st.markdown(section_header("description", "Paper Management"), unsafe_allow_html=True)
+    st.info("Upload PDF and TXT files containing the research papers you want to analyze.")
 
     # ── Upload Section ───────────────────────────────────────────────
     st.markdown(sub_header("cloud_upload", "Upload Papers"), unsafe_allow_html=True)

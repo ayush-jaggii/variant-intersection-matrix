@@ -2,7 +2,7 @@
 Variant Detection Module
 ========================
 
-Detects the presence of predefined variants (and their synonyms) in
+Detects the presence of predefined variants (and their alternate_names) in
 preprocessed paper texts.
 
 Strategy:
@@ -15,7 +15,7 @@ Strategy:
         }
 
     • Pre-compile a search index: unique_key → list of normalized search terms
-      (the variant name itself + all synonyms).  Normalization uses the
+      (the variant name itself + all alternate_names).  Normalization uses the
       same TextPreprocessor.preprocess_variant_term() as paper text.
 
     • Unique keys: if two variants share the same name but belong to
@@ -62,7 +62,7 @@ class VariantDetector:
     unique display keys (appending " (DimName)" when collisions exist).
 
     Attributes:
-        variants:     Flat list of variant dicts, each with "dimension", "name", "synonyms".
+        variants:     Flat list of variant dicts, each with "dimension", "name", "alternate_names".
         preprocessor: TextPreprocessor for normalizing variant terms.
         threshold:    Minimum occurrences to consider a variant "present".
     """
@@ -88,7 +88,7 @@ class VariantDetector:
         self._generate_unique_keys()
 
         # Build search index: unique_key → list of preprocessed search terms
-        self._search_index: Dict[str, List[str]] = {}
+        self._search_index: Dict[str, List[Tuple[str, re.Pattern]]] = {}
         self._build_search_index()
 
     # ── Public API ───────────────────────────────────────────────────────
@@ -97,7 +97,7 @@ class VariantDetector:
         self,
         preprocessed_texts: Dict[str, str],
         progress_callback=None,
-    ) -> Dict[str, Dict[str, bool]]:
+    ) -> Tuple[Dict[str, Dict[str, bool]], Dict[str, Dict[str, str]]]:
         """
         Detect variants in all papers.
 
@@ -115,20 +115,23 @@ class VariantDetector:
         )
 
         results: Dict[str, Dict[str, bool]] = {}
+        detected_details: Dict[str, Dict[str, str]] = {}
         for idx, (paper_id, text) in enumerate(preprocessed_texts.items()):
-            results[paper_id] = self.detect_in_text(text)
+            pres, dets = self.detect_in_text(text)
+            results[paper_id] = pres
+            detected_details[paper_id] = dets
             if progress_callback:
                 progress_callback(idx + 1, total)
 
-        return results
+        return results, detected_details
 
-    def detect_in_text(self, text: str) -> Dict[str, bool]:
+    def detect_in_text(self, text: str) -> Tuple[Dict[str, bool], Dict[str, str]]:
         """
         Check which variants are present in a single preprocessed text.
 
         Uses phrase-based substring matching on normalized text.
         The match is deterministic and consistent because both
-        paper text and synonym terms pass through the same normalization.
+        paper text and alternate_name terms pass through the same normalization.
 
         Args:
             text: Preprocessed text of a paper.
@@ -137,10 +140,13 @@ class VariantDetector:
             Dict mapping each unique variant key to a boolean presence flag.
         """
         presence: Dict[str, bool] = {}
+        details: Dict[str, str] = {}
         for unique_key, terms in self._search_index.items():
-            found = self._check_terms(text, terms)
+            found, term = self._check_terms(text, terms)
             presence[unique_key] = found
-        return presence
+            if found and term:
+                details[unique_key] = term
+        return presence, details
 
     def get_variant_names(self) -> List[str]:
         """
@@ -174,7 +180,7 @@ class VariantDetector:
 
     def count_occurrences(self, text: str, unique_key: str) -> int:
         """
-        Count total occurrences of a variant (all synonym terms) in text.
+        Count total occurrences of a variant (all alternate_name terms) in text.
 
         Useful for the UI to show how strongly a variant is represented.
         """
@@ -230,21 +236,27 @@ class VariantDetector:
 
         for v in self.variants:
             name = v["name"]
+            var_id = v.get("variant_id", "")
+            dim_id = v.get("dimension_id", "")
             dim = v.get("dimension", "Uncategorized")
+            
+            if dim_id and dim != "Uncategorized":
+                v["dimension_label"] = f"{dim_id} {dim}"
+            else:
+                v["dimension_label"] = dim
 
-            if name_counts[name] > 1:
-                # Disambiguate with dimension name
-                key = f"{name} ({dim})"
+            if var_id:
+                key = f"{var_id} {name}"
+                v["matrix_label"] = f"{name} ({var_id})"
             else:
                 key = name
+                v["matrix_label"] = name
 
-            # Handle edge case: even after appending dimension, there could
-            # still be a collision (two variants with same name in same dim).
-            # Add a numeric suffix if needed.
             base_key = key
             counter = 2
             while key in self._key_to_variant:
                 key = f"{base_key} #{counter}"
+                v["matrix_label"] = f'{v["matrix_label"]} #{counter}'
                 counter += 1
 
             self._unique_keys.append(key)
@@ -259,9 +271,9 @@ class VariantDetector:
     def _build_search_index(self):
         """
         Build the search index: for each variant, compile the list of
-        preprocessed search terms (variant name + all synonyms).
+        preprocessed search terms (variant name + all alternate_names).
 
-        Both the variant name and each synonym are normalized with
+        Both the variant name and each alternate_name are normalized with
         preprocess_variant_term() to match the normalization applied
         to the paper text.
 
@@ -272,10 +284,10 @@ class VariantDetector:
         for unique_key in self._unique_keys:
             variant = self._key_to_variant[unique_key]
             name = variant["name"]
-            synonyms = variant.get("synonyms", [])
+            alternate_names = variant.get("alternate_names", [])
 
-            # Collect all terms: the name itself + synonyms
-            raw_terms = [name] + synonyms
+            # Collect all terms: the name itself + alternate_names
+            raw_terms = [name] + alternate_names
             processed_patterns = []
             for term in raw_terms:
                 processed = self.preprocessor.preprocess_variant_term(term)
@@ -284,7 +296,7 @@ class VariantDetector:
                     escaped_term = re.escape(processed)
                     # Add word boundaries to avoid partial word matches
                     pattern = re.compile(rf"\b{escaped_term}\b")
-                    processed_patterns.append(pattern)
+                    processed_patterns.append((term, pattern))
 
             self._search_index[unique_key] = processed_patterns
 
@@ -294,7 +306,7 @@ class VariantDetector:
             sum(len(patterns) for patterns in self._search_index.values()),
         )
 
-    def _check_terms(self, text: str, compiled_patterns: List[re.Pattern]) -> bool:
+    def _check_terms(self, text: str, compiled_patterns: List[Tuple[str, re.Pattern]]) -> Tuple[bool, Optional[str]]:
         """
         Check if any pattern from the list appears in the text at least
         `threshold` times.
@@ -303,20 +315,20 @@ class VariantDetector:
         over repeated substring or raw regex searching.
         """
         total_count = 0
-        for pattern in compiled_patterns:
-            # Check threshold quickly. If threshold is 1, a simple search is faster.
+        detected_term = None
+        for term, pattern in compiled_patterns:
             if self.threshold == 1:
                 if pattern.search(text):
-                    return True
+                    return True, term
             else:
-                # finditer is generally faster than findall for just counting matches
                 count = sum(1 for _ in pattern.finditer(text))
+                if count > 0 and detected_term is None:
+                    detected_term = term  # Store first matching term
                 total_count += count
-                # Early exit if threshold is met
                 if total_count >= self.threshold:
-                    return True
+                    return True, detected_term
                     
-        return total_count >= self.threshold
+        return (total_count >= self.threshold), detected_term
 
     def _load_variants(self) -> List[Dict[str, Any]]:
         """
@@ -326,7 +338,7 @@ class VariantDetector:
             {"dimensions": {"DimName": {"VarName": ["syn1", ...]}}}
 
         And the legacy flat format:
-            {"variants": [{"name": "...", "synonyms": [...]}]}
+            {"variants": [{"name": "...", "alternate_names": [...]}]}
         """
         try:
             data = load_json(VARIANTS_FILE)
@@ -338,10 +350,10 @@ class VariantDetector:
             # Legacy flat format
             if isinstance(data, dict) and "variants" in data:
                 variants = data["variants"]
-                return self._ensure_dimension_fields(variants)
+                return dimensions_to_flat_list(flat_list_to_dimensions(self._ensure_dimension_fields(variants)))
 
             if isinstance(data, list):
-                return self._ensure_dimension_fields(data)
+                return dimensions_to_flat_list(flat_list_to_dimensions(self._ensure_dimension_fields(data)))
 
             return []
         except FileNotFoundError:

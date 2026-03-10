@@ -6,6 +6,16 @@ import time
 
 from streamlit.web import cli as stcli
 
+BROWSER_OPENED = False
+
+def open_browser_once(port):
+    global BROWSER_OPENED
+    if BROWSER_OPENED:
+        return
+    BROWSER_OPENED = True
+    time.sleep(2)
+    webbrowser.open(f"http://localhost:{port}")
+
 def main():
 
     port = "8501"
@@ -21,12 +31,8 @@ def main():
     print(f"🚀 Starting Variant Intersection Matrix Analyzer on port {port}...")
     print(f"App Path: {app_path}")
 
-    # open browser automatically
-    def open_browser():
-        time.sleep(2)
-        webbrowser.open(f"http://localhost:{port}")
-
-    threading.Thread(target=open_browser).start()
+    # open browser once
+    threading.Thread(target=open_browser_once, args=(port,), daemon=True).start()
 
     sys.argv = [
         "streamlit",

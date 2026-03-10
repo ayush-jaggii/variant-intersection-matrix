@@ -3,7 +3,7 @@ Variant Manager Component
 =========================
 
 Streamlit UI for defining, editing, and managing dimensions, variants,
-and their synonyms.
+and their alternate_names.
 
 Features:
     • Organize variants under dimensions
@@ -16,7 +16,7 @@ Features:
 Internal Data Model (session state):
     st.session_state.variants is a flat list:
         [
-          {"dimension": "Dim", "name": "Var", "synonyms": ["syn1", ...]},
+          {"dimension": "Dim", "name": "Var", "alternate_names": ["syn1", ...]},
           ...
         ]
 
@@ -47,6 +47,7 @@ def render_variant_manager():
         section_header("biotech", "Dimension & Variant Manager"),
         unsafe_allow_html=True,
     )
+    st.info("Define the dimensions, variants, and their alternate names that you want the analyzer to search for.")
 
     # Initialize session state for variants
     if "variants" not in st.session_state:
@@ -89,13 +90,13 @@ def _render_variant_list():
     col1, col2, col3 = st.columns(3)
     col1.metric("Dimensions", len(dimensions))
     col2.metric("Total Variants", len(variants))
-    total_synonyms = sum(len(v.get("synonyms", [])) for v in variants)
-    col3.metric("Total Synonyms", total_synonyms)
+    total_alternate_names = sum(len(v.get("alternate_names", [])) for v in variants)
+    col3.metric("Total Alternate Names", total_alternate_names)
 
     # Search filter
     search = st.text_input(
         "Search variants",
-        placeholder="Type to filter by variant name, synonym, or dimension...",
+        placeholder="Type to filter by variant name, alternate_name, or dimension...",
         key="variant_search",
     )
 
@@ -107,7 +108,7 @@ def _render_variant_list():
             v for v in variants
             if search_lower in v["name"].lower()
             or search_lower in v.get("dimension", "").lower()
-            or any(search_lower in s.lower() for s in v.get("synonyms", []))
+            or any(search_lower in s.lower() for s in v.get("alternate_names", []))
         ]
 
     st.write(f"Showing {len(filtered)} of {len(variants)} variants")
@@ -133,7 +134,7 @@ def _render_variant_card(variant: Dict[str, Any], idx: int):
     """Render a single variant card with edit/delete capabilities."""
     name = variant["name"]
     dimension = variant.get("dimension", "Uncategorized")
-    synonyms = variant.get("synonyms", [])
+    alternate_names = variant.get("alternate_names", [])
     edit_key = f"editing_{dimension}_{name}"
 
     # Check if in edit mode
@@ -144,11 +145,11 @@ def _render_variant_card(variant: Dict[str, Any], idx: int):
     col1, col2, col3 = st.columns([4, 1, 1])
     with col1:
         st.markdown(f"**{name}**")
-        if synonyms:
-            synonym_tags = ", ".join(f"`{s}`" for s in synonyms)
-            st.caption(f"Synonyms: {synonym_tags}")
+        if alternate_names:
+            alternate_name_tags = ", ".join(f"`{s}`" for s in alternate_names)
+            st.caption(f"Alternate Names: {alternate_name_tags}")
         else:
-            st.caption("_No synonyms defined_")
+            st.caption("_No alternate_names defined_")
     with col2:
         if st.button("Edit", key=f"edit_{dimension}_{name}_{idx}", help="Edit variant"):
             st.session_state[edit_key] = True
@@ -168,7 +169,7 @@ def _render_edit_form(variant: Dict[str, Any], idx: int):
     """Render inline edit form for a variant."""
     name = variant["name"]
     dimension = variant.get("dimension", "Uncategorized")
-    synonyms = variant.get("synonyms", [])
+    alternate_names = variant.get("alternate_names", [])
     edit_key = f"editing_{dimension}_{name}"
 
     existing_dims = _get_dimensions(st.session_state.variants)
@@ -185,9 +186,9 @@ def _render_edit_form(variant: Dict[str, Any], idx: int):
         value=name,
         key=f"edit_name_{dimension}_{name}_{idx}",
     )
-    new_synonyms = st.text_area(
-        "Synonyms (one per line)",
-        value="\n".join(synonyms),
+    new_alternate_names = st.text_area(
+        "Alternate Names (one per line)",
+        value="\n".join(alternate_names),
         key=f"edit_syns_{dimension}_{name}_{idx}",
         height=100,
     )
@@ -195,14 +196,14 @@ def _render_edit_form(variant: Dict[str, Any], idx: int):
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Save", key=f"save_{dimension}_{name}_{idx}"):
-            parsed_synonyms = [
-                s.strip() for s in new_synonyms.split("\n") if s.strip()
+            parsed_alternate_names = [
+                s.strip() for s in new_alternate_names.split("\n") if s.strip()
             ]
             for v in st.session_state.variants:
                 if v["name"] == name and v.get("dimension") == dimension:
                     v["dimension"] = new_dim.strip() or "Uncategorized"
                     v["name"] = new_name.strip()
-                    v["synonyms"] = parsed_synonyms
+                    v["alternate_names"] = parsed_alternate_names
                     break
             _save_variants()
             st.session_state[edit_key] = False
@@ -247,10 +248,10 @@ def _render_add_variant_form():
             placeholder="e.g., Energy Consuming",
             help="The primary name for this variant.",
         )
-        synonyms_text = st.text_area(
-            "Synonyms (one per line)",
+        alternate_names_text = st.text_area(
+            "Alternate Names (one per line)",
             placeholder="e.g.,\nenergy consuming\nelectric powered\nenergy-intensive",
-            help="Enter synonyms that should also be detected as this variant.",
+            help="Enter alternate_names that should also be detected as this variant.",
             height=150,
         )
 
@@ -276,18 +277,18 @@ def _render_add_variant_form():
                     )
                     return
 
-            synonyms = [s.strip() for s in synonyms_text.split("\n") if s.strip()]
+            alternate_names = [s.strip() for s in alternate_names_text.split("\n") if s.strip()]
 
             new_variant = {
                 "dimension": dimension,
                 "name": clean_name,
-                "synonyms": synonyms,
+                "alternate_names": alternate_names,
             }
             st.session_state.variants.append(new_variant)
             _save_variants()
             st.success(
                 f"Added variant '{clean_name}' to dimension '{dimension}' "
-                f"with {len(synonyms)} synonym(s)."
+                f"with {len(alternate_names)} alternate_name(s)."
             )
 
 
@@ -325,7 +326,7 @@ def _render_import_export():
     st.markdown(sub_header("upload_file", "Import Variants"), unsafe_allow_html=True)
     st.caption(
         "Supported formats: **CSV**, **JSON**, **Excel (.xlsx)**. "
-        "CSV and Excel files must have columns: `dimension`, `variant`, `synonym`."
+        "CSV and Excel files must have columns: `dimension`, `variant`, `alternate_name`."
     )
 
     uploaded = st.file_uploader(
@@ -361,11 +362,11 @@ def _handle_variant_import(uploaded):
         imported_flat = dimensions_to_flat_list(dimension_dict)
         dim_count = len(dimension_dict)
         var_count = len(imported_flat)
-        syn_count = sum(len(v.get("synonyms", [])) for v in imported_flat)
+        syn_count = sum(len(v.get("alternate_names", [])) for v in imported_flat)
 
         st.success(
             f"Parsed **{var_count}** variants across **{dim_count}** dimensions "
-            f"with **{syn_count}** total synonyms."
+            f"with **{syn_count}** total alternate_names."
         )
 
         # Preview
@@ -373,7 +374,7 @@ def _handle_variant_import(uploaded):
             for dim_name, variants in sorted(dimension_dict.items()):
                 st.markdown(f"**{dim_name}**")
                 for var_name, syns in variants.items():
-                    st.markdown(f"- {var_name}: {', '.join(syns) if syns else '(no synonyms)'}")
+                    st.markdown(f"- {var_name}: {', '.join(syns) if syns else '(no alternate_names)'}")
 
         # Import mode
         import_mode = st.radio(

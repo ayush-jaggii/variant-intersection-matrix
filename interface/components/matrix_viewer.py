@@ -37,16 +37,23 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import plotly.io as pio
 from typing import List, Optional, Tuple
 
+# Configure kaleido for Pyinstaller 
+pio.kaleido.scope.default_format = "png"
+pio.kaleido.scope.default_width = 1600
+pio.kaleido.scope.default_height = 900
+
 from config.settings import HEATMAP_COLORSCALE, HEATMAP_ZERO_COLOR, OUTPUT_DIR
-from core.matrix_computation import MatrixComputer, EXCLUDED_PAIR_VALUE
+from core.matrix_computation import MatrixComputer, EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, LOWER_TRIANGLE_VALUE
 from interface.design import section_header, sub_header, icon, COLORS
 
 
 def render_matrix_viewer():
     """Render the interactive matrix viewer."""
     st.markdown(section_header("grid_view", "Matrix Viewer"), unsafe_allow_html=True)
+    st.info("Explore the interactive matrices, find research gaps, and manually validate findings.")
 
     if not st.session_state.get("analysis_complete", False):
         st.info("Run the analysis first to view matrices.")
@@ -103,28 +110,95 @@ def _render_intersection_matrix(
         "Select a pair below to see supporting papers."
     )
 
-    # ── Variant Filter (Filterable Matrix — Req #2) ──────────────────
-    # Users select a subset of variants; the heatmap updates in real time.
-    # Filtering is a simple DataFrame slice — no recomputation needed.
+    # ── Variant Filter (Filterable Matrix — Req #2 and Req #1) ──────────────────
+    # Users select a subset of dimensions or variants; the heatmap updates in real time.
     all_variants = list(intersection_df.columns)
-
-    selected_variants = st.multiselect(
-        "Filter variants (leave empty to show all)",
-        options=all_variants,
-        default=[],
-        key="filter_intersection_variants",
-        help="Select specific variants to display a filtered sub-matrix.",
-    )
+    detector = st.session_state.get("variant_detector")
+    
+    if detector:
+        # Get unique dimension labels
+        dimension_labels = []
+        dim_to_vars = {}
+        for key in all_variants:
+            details = detector.get_variant_details(key)
+            if details:
+                d_label = details.get("dimension_label", details.get("dimension", "Uncategorized"))
+                if d_label not in dimension_labels:
+                    dimension_labels.append(d_label)
+                if d_label not in dim_to_vars:
+                    dim_to_vars[d_label] = []
+                dim_to_vars[d_label].append(key)
+                
+        selected_dimensions = st.multiselect(
+            "Filter by Dimensions (Optional)",
+            options=dimension_labels,
+            default=[],
+            key="filter_intersection_dims",
+            help="Select one or more dimensions to filter the matrix."
+        )
+        
+        # Determine valid variants based on dimensions
+        if selected_dimensions:
+            filtered_variants = []
+            for d in selected_dimensions:
+                filtered_variants.extend(dim_to_vars.get(d, []))
+        else:
+            filtered_variants = all_variants
+            
+        selected_variants = st.multiselect(
+            "Filter specific variants (Optional)",
+            options=filtered_variants,
+            default=[],
+            key="filter_intersection_variants",
+            help="Narrow down specific variants within the selected dimensions."
+        )
+        display_variants = selected_variants if selected_variants else filtered_variants
+    else:
+        selected_variants = st.multiselect(
+            "Filter variants (leave empty to show all)",
+            options=all_variants,
+            default=[],
+            key="filter_intersection_variants",
+            help="Select specific variants to display a filtered sub-matrix.",
+        )
+        display_variants = selected_variants if selected_variants else all_variants
 
     # Apply filter: slice both rows and columns
-    if selected_variants:
-        display_df = intersection_df.loc[selected_variants, selected_variants]
+    if display_variants and len(display_variants) < len(intersection_df.columns):
+        display_df = intersection_df.loc[display_variants, display_variants]
     else:
         display_df = intersection_df
 
     # Create heatmap with dynamic text colors
     fig = _create_intersection_heatmap(display_df, dimension_map)
     st.plotly_chart(fig, use_container_width=True, key="intersection_heatmap")
+
+    # Image download buttons
+    st.markdown("Download Heatmap Visualization", unsafe_allow_html=True)
+    colA, colB, _ = st.columns([1, 1, 4])
+    try:
+        png_bytes = fig.to_image(format="png", width=1200, height=800, scale=2, engine="kaleido")
+        colA.download_button("Download PNG", data=png_bytes, file_name="vim_heatmap.png", mime="image/png")
+        svg_bytes = fig.to_image(format="svg", width=1200, height=800, engine="kaleido")
+        colB.download_button("Download SVG", data=svg_bytes, file_name="vim_heatmap.svg", mime="image/svg+xml")
+    except Exception as e:
+        st.error(f"Image generation failed: {e}")
+
+    # Variant Legend Table
+    if detector:
+        with st.expander("View Variant Legend", expanded=False):
+            legend_data = []
+            for key in all_variants:
+                details = detector.get_variant_details(key)
+                if details:
+                    legend_data.append({
+                        "Variant ID": details.get("variant_id", ""),
+                        "Variant Name": details.get("name", ""),
+                        "Dimension ID": details.get("dimension_id", ""),
+                        "Dimension Name": details.get("dimension", "")
+                    })
+            if legend_data:
+                st.dataframe(pd.DataFrame(legend_data), use_container_width=True)
 
     # ── Cell Drill-Down ──────────────────────────────────────────────
     st.divider()
@@ -167,10 +241,27 @@ def _render_intersection_matrix(
 
         if papers:
             id_map = st.session_state.get("paper_id_map", {})
+            details_map = st.session_state.get("detection_details", {})
             for paper_id in papers:
                 fname = id_map.get(paper_id, "")
                 display = f"- **{paper_id}** → {fname}" if fname else f"- `{paper_id}`"
-                st.markdown(display)
+                
+                # Show detected alternate names if available
+                p_details = details_map.get(paper_id, {})
+                term_a = p_details.get(va)
+                
+                if va == vb:
+                    if term_a:
+                        display += f" <br>&nbsp;&nbsp;&nbsp;&nbsp;↳ <span style='color:gray; font-size:0.9em'>Found as: '{term_a}'</span>"
+                else:
+                    term_b = p_details.get(vb)
+                    parts = []
+                    if term_a: parts.append(f"**{va}** found as '{term_a}'")
+                    if term_b: parts.append(f"**{vb}** found as '{term_b}'")
+                    if parts:
+                        display += f" <br>&nbsp;&nbsp;&nbsp;&nbsp;↳ <span style='color:gray; font-size:0.9em'>{' | '.join(parts)}</span>"
+
+                st.markdown(display, unsafe_allow_html=True)
 
 
 def _get_dynamic_text_color(value: float, max_value: float) -> str:
@@ -218,9 +309,11 @@ def _create_intersection_heatmap(
     # Replace excluded cells (-1) with NaN for Plotly rendering
     display_values = raw_values.copy()
     display_values[display_values == EXCLUDED_PAIR_VALUE] = np.nan
+    display_values[display_values == SAME_VARIANT_VALUE] = np.nan
+    display_values[display_values == LOWER_TRIANGLE_VALUE] = np.nan
 
     # Compute max for dynamic text color thresholding
-    valid_values = raw_values[raw_values != EXCLUDED_PAIR_VALUE]
+    valid_values = raw_values[~np.isin(raw_values, [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, LOWER_TRIANGLE_VALUE])]
     max_val = float(np.nanmax(valid_values)) if len(valid_values) > 0 else 1.0
 
     # Custom hover text
@@ -229,8 +322,10 @@ def _create_intersection_heatmap(
         row_texts = []
         for j, col_label in enumerate(labels):
             val = raw_values[i][j]
-            if i == j:
-                row_texts.append(f"{row_label}: {int(val)} papers total")
+            if val == SAME_VARIANT_VALUE:
+                row_texts.append("Same variant (Diagonal omission)")
+            elif val == LOWER_TRIANGLE_VALUE:
+                row_texts.append("")
             elif val == EXCLUDED_PAIR_VALUE:
                 dim = dimension_map.get(row_label, "?")
                 row_texts.append(
@@ -250,22 +345,28 @@ def _create_intersection_heatmap(
     for i in range(len(labels)):
         for j in range(len(labels)):
             val = raw_values[i][j]
+            text = ""
+            font_color = COLORS["text_muted"]
             if val == EXCLUDED_PAIR_VALUE:
                 text = "×"
-                font_color = COLORS["text_muted"]
+            elif val == SAME_VARIANT_VALUE:
+                text = "—"
+            elif val == LOWER_TRIANGLE_VALUE:
+                text = "" # leave empty
             else:
                 text = str(int(val))
                 font_color = _get_dynamic_text_color(val, max_val)
 
-            annotations.append(dict(
-                x=labels[j],
-                y=labels[i],
-                text=text,
-                font=dict(size=9, color=font_color),
-                showarrow=False,
-                xref="x",
-                yref="y",
-            ))
+            if text:
+                annotations.append(dict(
+                    x=labels[j],
+                    y=labels[i],
+                    text=text,
+                    font=dict(size=9, color=font_color),
+                    showarrow=False,
+                    xref="x",
+                    yref="y",
+                ))
 
     fig = go.Figure(data=go.Heatmap(
         z=display_values,
@@ -276,23 +377,27 @@ def _create_intersection_heatmap(
         colorscale=HEATMAP_COLORSCALE,
         showscale=True,
         colorbar=dict(title="Count"),
+        hoverongaps=False
         # No texttemplate — we use layout annotations for per-cell colors
     ))
 
     fig.update_layout(
-        height=max(600, len(labels) * 18),
+        height=len(labels) * 20 + 300,
+        width=len(labels) * 20 + 300,
         font=dict(family="Inter, sans-serif"),
         annotations=annotations,
         xaxis=dict(
             tickangle=45,
             side="bottom",
             tickfont=dict(size=9),
+            automargin=True,
         ),
         yaxis=dict(
             autorange="reversed",
             tickfont=dict(size=9),
+            automargin=True,
         ),
-        margin=dict(l=10, r=10, t=30, b=10),
+        margin=dict(l=150, r=50, t=50, b=150),
         plot_bgcolor=COLORS["surface"],
         paper_bgcolor=COLORS["white"],
     )
@@ -344,9 +449,9 @@ def _render_paper_variant_matrix(df: pd.DataFrame):
         fig.update_layout(
             height=max(400, len(display_df) * 16),
             font=dict(family="Inter, sans-serif"),
-            xaxis=dict(tickangle=45, tickfont=dict(size=8)),
-            yaxis=dict(tickfont=dict(size=8), autorange="reversed"),
-            margin=dict(l=10, r=10, t=10, b=10),
+            xaxis=dict(tickangle=45, tickfont=dict(size=8), automargin=True),
+            yaxis=dict(tickfont=dict(size=8), autorange="reversed", automargin=True),
+            margin=dict(l=50, r=10, t=10, b=150),
             plot_bgcolor=COLORS["white"],
             paper_bgcolor=COLORS["white"],
         )

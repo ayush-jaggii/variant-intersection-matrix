@@ -4,7 +4,7 @@ Text Preprocessing Module
 
 Normalizes and cleans extracted text to improve variant matching accuracy.
 
-Normalization Pipeline (applied to both paper text AND synonym terms):
+Normalization Pipeline (applied to both paper text AND alternate_name terms):
     1. Unicode normalization (NFKD — decomposes ligatures and accents)
     2. Lowercase conversion
     3. Replace hyphens / underscores with spaces
@@ -14,10 +14,10 @@ Normalization Pipeline (applied to both paper text AND synonym terms):
 
 Why this matters:
     Variant detection uses substring matching.  If the paper says
-    "Temporary-use." and the synonym is "temporary use", both must
+    "Temporary-use." and the alternate_name is "temporary use", both must
     be normalized identically ("temporary use") for the match to work.
 
-    The same `preprocess_variant_term()` method is used on synonyms
+    The same `preprocess_variant_term()` method is used on alternate_names
     during search-index construction, guaranteeing identical normalization.
 """
 
@@ -51,7 +51,7 @@ class TextPreprocessor:
 
     The same normalization is applied to:
         1. Full paper texts   (via preprocess / preprocess_all)
-        2. Individual synonym terms (via preprocess_variant_term)
+        2. Individual alternate_name terms (via preprocess_variant_term)
 
     This ensures that matching is deterministic and consistent.
 
@@ -142,15 +142,15 @@ class TextPreprocessor:
 
     def preprocess_variant_term(self, term: str) -> str:
         """
-        Apply the same normalization to a variant name or synonym
+        Apply the same normalization to a variant name or alternate_name
         so that matching uses identical representations.
 
         This is critical for correct matching:
-            synonym "energy-intensive" → "energy intensive"
+            alternate_name "energy-intensive" → "energy intensive"
             paper text "...energy intensive..." → match!
 
         Args:
-            term: Variant name or synonym string.
+            term: Variant name or alternate_name string.
 
         Returns:
             Preprocessed term.

@@ -93,6 +93,7 @@ def _check_and_load_results():
         st.session_state.paper_variant_df = data["paper_variant_df"]
         st.session_state.intersection_df = data["intersection_df"]
         st.session_state.detection_results = data["detection_results"]
+        st.session_state.detection_details = data["detection_details"]
         st.session_state.preprocessed_texts = data["preprocessed"]
         st.session_state.variant_detector = data["detector"]
         st.session_state.dimension_map = data["dimension_map"]
@@ -115,6 +116,7 @@ def _check_and_load_results():
 def render_analysis_runner():
     """Render the Analysis Runner section of the UI."""
     st.markdown(section_header("settings", "Run Analysis"), unsafe_allow_html=True)
+    st.info("Click the button below to extract text, process papers, and build the Variant Intersection Matrix.")
 
     # Pre-check: are papers and variants ready?
     papers = list_paper_files(PAPERS_DIR)
@@ -324,6 +326,7 @@ def _run_pipeline_in_thread(variants: list):
         raw_texts = {}
         preprocessed = {}
         detection_results = {}
+        detection_details = {}
 
         # Limit to CPU cores safely
         max_workers = max(1, multiprocessing.cpu_count() - 1)
@@ -340,9 +343,11 @@ def _run_pipeline_in_thread(variants: list):
         with ThreadPoolExecutor(max_workers=max_workers) as pool:
             for i, result in enumerate(pool.map(process_single_paper, args_list)):
                 paper_id, text, norm_text, detection = result
+                presence, details = detection
                 raw_texts[paper_id] = text
                 preprocessed[paper_id] = norm_text
-                detection_results[paper_id] = detection
+                detection_results[paper_id] = presence
+                detection_details[paper_id] = details
                 _RESULT["sub_current"] = i + 1
 
         if not raw_texts:
@@ -361,7 +366,7 @@ def _run_pipeline_in_thread(variants: list):
 
         computer = MatrixComputer()
         paper_variant_df = computer.build_paper_variant_matrix(
-            detection_results, variant_names
+            detection_results, variant_names, detection_details
         )
         intersection_df = computer.compute_intersection_matrix(
             dimension_map=dimension_map,
@@ -377,6 +382,7 @@ def _run_pipeline_in_thread(variants: list):
             "paper_variant_df": paper_variant_df,
             "intersection_df": intersection_df,
             "detection_results": detection_results,
+            "detection_details": detection_details,
             "preprocessed": preprocessed,
             "detector": detector,
             "dimension_map": dimension_map,

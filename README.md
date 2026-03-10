@@ -1,6 +1,6 @@
 # 🔬 Variant Intersection Matrix Analyzer
 
-A structured Python system for analyzing research papers using a **Variant Intersection Matrix**. The system detects predefined variants (with synonyms) across academic papers and computes pairwise intersection counts to identify research coverage and gaps.
+A structured Python system for analyzing research papers using a **Variant Intersection Matrix**. The system detects predefined variants (with alternate_names) across academic papers and computes pairwise intersection counts to identify research coverage and gaps.
 
 ---
 
@@ -56,7 +56,7 @@ Model/
 │   └── components/
 │       ├── __init__.py
 │       ├── paper_manager.py     # Paper upload & management
-│       ├── variant_manager.py   # Variant/synonym CRUD
+│       ├── variant_manager.py   # Variant/alternate_name CRUD
 │       ├── analysis_runner.py   # Analysis orchestration
 │       └── matrix_viewer.py     # Interactive matrix display
 ├── utils/
@@ -102,7 +102,7 @@ The compiled application will be available in the `dist_release/` directory as `
 ### 3. Use the Application
 
 1. **📄 Papers** — Upload your PDF research papers
-2. **🧬 Variants** — Define variants and their synonyms
+2. **🧬 Variants** — Define variants and their alternate_names
 3. **⚙️ Run Analysis** — Execute the detection pipeline
 4. **📊 View Results** — Explore the interactive matrices
 

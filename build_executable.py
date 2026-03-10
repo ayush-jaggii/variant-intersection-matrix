@@ -23,7 +23,40 @@ def run_pyinstaller():
     """Runs the PyInstaller compilation command."""
     print("🔨 Starting PyInstaller bundle compilation (this may take a while)...")
     
-    # Execute the pyinstaller command exactly as requested
+    # Create a version file for metadata inclusion
+    version_info_content = """VSVersionInfo(
+      ffi=FixedFileInfo(
+        filevers=(1, 0, 0, 0),
+        prodvers=(1, 0, 0, 0),
+        mask=0x3f,
+        flags=0x0,
+        OS=0x40004,
+        fileType=0x1,
+        subtype=0x0,
+        date=(0, 0)
+        ),
+      kids=[
+        StringFileInfo(
+          [
+          StringTable(
+            u'040904B0',
+            [StringStruct(u'CompanyName', u'Ayush Jaggi'),
+            StringStruct(u'FileDescription', u'Variant Intersection Matrix Analyzer'),
+            StringStruct(u'FileVersion', u'1.0.0'),
+            StringStruct(u'InternalName', u'VIM_Analyzer'),
+            StringStruct(u'LegalCopyright', u'© Ayush Jaggi. All rights reserved.'),
+            StringStruct(u'OriginalFilename', u'VIM_Analyzer'),
+            StringStruct(u'ProductName', u'VIM Analyzer'),
+            StringStruct(u'ProductVersion', u'1.0.0'),
+            StringStruct(u'Author', u'Ayush Jaggi')])
+          ]), 
+        VarFileInfo([VarStruct(u'Translation', [1033, 1200])])
+      ]
+    )
+    """
+    with open("version_info.txt", "w") as f:
+        f.write(version_info_content)
+
     command = [
         "pyinstaller",
         "--onefile",
@@ -38,11 +71,15 @@ def run_pyinstaller():
         "--copy-metadata", "streamlit",
         "--collect-all", "streamlit",
         "--collect-all", "fitz",
+        "--collect-all", "kaleido",
+        "--collect-all", "plotly",
         "--add-data", f"data{os.pathsep}data",
         "--add-data", f"interface{os.pathsep}interface",
         "--add-data", f"core{os.pathsep}core",
         "--add-data", f"config{os.pathsep}config",
         "--add-data", f"utils{os.pathsep}utils",
+        "--osx-bundle-identifier", "com.ayushjaggi.vimanalyzer",
+        "--version-file", "version_info.txt",
         "--name", "VIM_Analyzer",
         "launcher.py"
     ]

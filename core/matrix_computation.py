@@ -84,7 +84,8 @@ logger = logging.getLogger(__name__)
 # Sentinel value used in the intersection matrix for same-dimension pairs.
 # These cells are excluded from counting, gaps analysis, etc.
 EXCLUDED_PAIR_VALUE = -1
-
+SAME_VARIANT_VALUE = -2
+LOWER_TRIANGLE_VALUE = -3
 
 @st.cache_data(show_spinner=False)
 def _cached_build_base_matrix(
@@ -110,22 +111,26 @@ def _cached_compute_intersection(
 
     variant_names = list(paper_variant_df.columns)
     result = pd.DataFrame(
-        raw_intersection,
+        raw_intersection.astype(float),
         index=variant_names,
         columns=variant_names,
     )
 
-    if dimension_map:
-        n = len(variant_names)
-        for i in range(n):
-            for j in range(i + 1, n):
+    n = len(variant_names)
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                result.iloc[i, j] = SAME_VARIANT_VALUE
+            elif j < i:
+                result.iloc[i, j] = LOWER_TRIANGLE_VALUE
+            else:
                 vi = variant_names[i]
                 vj = variant_names[j]
-                dim_i = dimension_map.get(vi, "")
-                dim_j = dimension_map.get(vj, "")
-                if dim_i and dim_j and dim_i == dim_j:
-                    result.iloc[i, j] = EXCLUDED_PAIR_VALUE
-                    result.iloc[j, i] = EXCLUDED_PAIR_VALUE
+                if dimension_map:
+                    dim_i = dimension_map.get(vi, "")
+                    dim_j = dimension_map.get(vj, "")
+                    if dim_i and dim_j and dim_i == dim_j:
+                        result.iloc[i, j] = EXCLUDED_PAIR_VALUE
     return result
 
 
@@ -158,6 +163,7 @@ class MatrixComputer:
         self.dimension_map: Dict[str, str] = {}
         self._detection_results_raw: Optional[Dict[str, Dict[str, bool]]] = None
         self._variant_names: List[str] = []
+        self._detection_details: Dict[str, Dict[str, str]] = {}
         self._manual_overrides: Dict[str, Dict[str, bool]] = {}
         self._pair_overrides: Dict[str, List[List[str]]] = {}
         self._load_overrides()
@@ -169,6 +175,7 @@ class MatrixComputer:
         self,
         detection_results: Dict[str, Dict[str, bool]],
         variant_names: List[str],
+        detection_details: Optional[Dict[str, Dict[str, str]]] = None,
     ) -> pd.DataFrame:
         """
         Build the Paper × Variant binary matrix from detection results.
@@ -190,6 +197,8 @@ class MatrixComputer:
         # cumulative drift
         self._detection_results_raw = detection_results
         self._variant_names = variant_names
+        if detection_details is not None:
+            self._detection_details = detection_details
 
         # Use cached function for the heavy base computation
         df = _cached_build_base_matrix(detection_results, variant_names)
@@ -272,7 +281,7 @@ class MatrixComputer:
 
         # Step 1-3: Rebuild paper-variant with overrides
         self.build_paper_variant_matrix(
-            self._detection_results_raw, self._variant_names
+            self._detection_results_raw, self._variant_names, self._detection_details
         )
         # Step 4: Recompute intersection
         self.compute_intersection_matrix()
@@ -401,6 +410,22 @@ class MatrixComputer:
                     "supporting_papers": "; ".join(papers),
                 })
 
+        return pd.DataFrame(rows)
+
+    def generate_detection_details(self) -> pd.DataFrame:
+        """
+        Generate a DataFrame showing the specific alternate name terms detected 
+        for each paper and variant.
+        """
+        rows = []
+        if self._detection_details:
+            for paper_id, details in self._detection_details.items():
+                for variant_key, term in details.items():
+                    rows.append({
+                        "paper_id": paper_id,
+                        "variant": variant_key,
+                        "detected_term": term
+                    })
         return pd.DataFrame(rows)
 
     def get_summary_stats(self) -> Dict[str, Any]:
@@ -609,6 +634,12 @@ class MatrixComputer:
             path = output_dir / PAIR_DETAILS_CSV
             pair_df.to_csv(path, index=False)
             logger.info("Exported: %s", path)
+            
+            details_df = self.generate_detection_details()
+            if not details_df.empty:
+                path = output_dir / "detection_details.csv"
+                details_df.to_csv(path, index=False)
+                logger.info("Exported: %s", path)
 
     # ── Internal ─────────────────────────────────────────────────────────
 

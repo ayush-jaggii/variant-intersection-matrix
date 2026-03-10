@@ -38,7 +38,7 @@ for _dir in (PAPERS_DIR, VARIANTS_DIR, OUTPUT_DIR, CACHE_DIR):
 #   {
 #     "dimensions": {
 #       "Dimension Name": {
-#         "Variant Name": ["synonym1", "synonym2", ...]
+#         "Variant Name": ["alternate_name1", "alternate_name2", ...]
 #       }
 #     }
 #   }

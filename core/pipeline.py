@@ -19,7 +19,7 @@ def process_single_paper(args):
       (TimeoutError) when macOS attempts to load library files from the cloud.
     - PyMuPDF: Inside TextExtractor, we use fitz (PyMuPDF) instead of pdfplumber
       because it is implemented in C and parses PDFs orders of magnitude faster.
-    - Regex Precompilation: Inside VariantDetector, synonym patterns are precompiled
+    - Regex Precompilation: Inside VariantDetector, alternate_name patterns are precompiled
       once into regex objects, removing the overhead of parsing regex strings on every paper.
     - Caching Layer: Text extraction results are written to disk based on the 
       file's modification time (mtime), ensuring we never reprocess untouched PDFs.
