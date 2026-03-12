@@ -37,16 +37,17 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import plotly.io as pio
+import matplotlib.pyplot as plt
+import seaborn as sns
+from io import BytesIO
+from matplotlib.colors import LinearSegmentedColormap
 from typing import List, Optional, Tuple
 
-# Configure kaleido for Pyinstaller 
-pio.kaleido.scope.default_format = "png"
-pio.kaleido.scope.default_width = 1600
-pio.kaleido.scope.default_height = 900
+
 
 from config.settings import HEATMAP_COLORSCALE, HEATMAP_ZERO_COLOR, OUTPUT_DIR
-from core.matrix_computation import MatrixComputer, EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, LOWER_TRIANGLE_VALUE
+from core.matrix_computation import MatrixComputer, EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE
+from core.conceptual_validation import ConceptualValidator
 from interface.design import section_header, sub_header, icon, COLORS
 
 
@@ -64,12 +65,17 @@ def render_matrix_viewer():
     intersection_df: pd.DataFrame = st.session_state.intersection_df
     dimension_map = st.session_state.get("dimension_map", {})
 
+    if "conceptual_validator" not in st.session_state:
+        st.session_state.conceptual_validator = ConceptualValidator(list(intersection_df.columns))
+    validator = st.session_state.conceptual_validator
+
     # ── Tabs ─────────────────────────────────────────────────────────
-    tab_intersection, tab_paper_variant, tab_gaps, tab_validation, tab_download = st.tabs([
+    tab_intersection, tab_paper_variant, tab_gaps, tab_overrides, tab_validation, tab_download = st.tabs([
         "Intersection Matrix",
         "Paper x Variant Matrix",
         "Research Gaps",
-        "Manual Validation",
+        "Detection Overrides",
+        "Manual Validation & Research Fertility",
         "Download Results",
     ])
 
@@ -82,8 +88,11 @@ def render_matrix_viewer():
     with tab_gaps:
         _render_research_gaps(computer, dimension_map)
 
+    with tab_overrides:
+        _render_detection_overrides(paper_variant_df, computer)
+
     with tab_validation:
-        _render_manual_validation(paper_variant_df, computer)
+        _render_manual_validation(intersection_df, validator, dimension_map)
 
     with tab_download:
         _render_download_results()
@@ -169,20 +178,43 @@ def _render_intersection_matrix(
     else:
         display_df = intersection_df
 
+    # ── Heatmap Styling Config ──────────────────────────
+    st.markdown("### Visualization Settings")
+    colA, colB = st.columns([1, 2])
+    with colA:
+        color_scheme = st.selectbox(
+            "Heatmap Color Scheme",
+            options=["Blues", "Viridis", "Plasma", "Greys", "Cividis"],
+            index=0,
+            key="heatmap_color_scheme",
+            help="Select the color palette for both the display and downloaded image."
+        )
+
     # Create heatmap with dynamic text colors
-    fig = _create_intersection_heatmap(display_df, dimension_map)
+    fig = _create_intersection_heatmap(display_df, dimension_map, color_scheme)
     st.plotly_chart(fig, use_container_width=True, key="intersection_heatmap")
 
     # Image download buttons
     st.markdown("Download Heatmap Visualization", unsafe_allow_html=True)
-    colA, colB, _ = st.columns([1, 1, 4])
-    try:
-        png_bytes = fig.to_image(format="png", width=1200, height=800, scale=2, engine="kaleido")
-        colA.download_button("Download PNG", data=png_bytes, file_name="vim_heatmap.png", mime="image/png")
-        svg_bytes = fig.to_image(format="svg", width=1200, height=800, engine="kaleido")
-        colB.download_button("Download SVG", data=svg_bytes, file_name="vim_heatmap.svg", mime="image/svg+xml")
-    except Exception as e:
-        st.error(f"Image generation failed: {e}")
+    
+    matrix_hash = str(hash(display_df.values.tobytes())) + "_" + color_scheme
+    state_key = f"heatmap_export_{matrix_hash}"
+
+    if st.session_state.get(state_key) is None:
+        if st.button("Prepare Output Images for Download", help="Generate high-resolution PNG and SVG files."):
+            with st.spinner("Generating imagery..."):
+                try:
+                    png_bytes = _generate_static_heatmap(display_df, dimension_map, color_scheme, format="png")
+                    svg_bytes = _generate_static_heatmap(display_df, dimension_map, color_scheme, format="svg")
+                    st.session_state[state_key] = {"png": png_bytes, "svg": svg_bytes}
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Image generation failed: {e}")
+    else:
+        export_data = st.session_state[state_key]
+        col_png, col_svg, _ = st.columns([1, 1, 4])
+        col_png.download_button("Download PNG", data=export_data["png"], file_name="vim_heatmap.png", mime="image/png")
+        col_svg.download_button("Download SVG", data=export_data["svg"], file_name="vim_heatmap.svg", mime="image/svg+xml")
 
     # Variant Legend Table
     if detector:
@@ -264,57 +296,53 @@ def _render_intersection_matrix(
                 st.markdown(display, unsafe_allow_html=True)
 
 
-def _get_dynamic_text_color(value: float, max_value: float) -> str:
+def _get_dynamic_text_color(value: float, max_value: float, color_scheme: str = "Blues") -> str:
     """
     Determine text color for a heatmap cell based on background intensity.
-
-    How this works:
-        The heatmap uses a gradient from light (#EEF1F6) to dark (#1B2A4A).
-        Values above ~40% of the max are on dark backgrounds, so we switch
-        text to white for readability.
-
-    Args:
-        value:     The cell's numeric value.
-        max_value: The maximum value in the matrix (for normalization).
-
-    Returns:
-        CSS color string — white for dark backgrounds, near-black for light.
     """
-    if max_value <= 0:
-        return COLORS["text"]
+    if value == 0 or max_value <= 0:
+        return COLORS.get("text", "#212121")
+        
     ratio = value / max_value
-    # Threshold at 40%: above this the blue gradient is dark enough
-    # that black text becomes hard to read
-    if ratio > 0.40:
-        return "#FFFFFF"
-    return COLORS["text"]
+    
+    # White background requires dark text, dark requires white
+    if color_scheme == "Blues":
+        return "#FFFFFF" if ratio > 0.40 else COLORS.get("text", "#212121")
+    elif color_scheme == "Greys":
+        return "#FFFFFF" if ratio > 0.50 else COLORS.get("text", "#212121")
+    elif color_scheme in ["Viridis", "Plasma", "Cividis"]:
+        return COLORS.get("text", "#212121") if ratio > 0.50 else "#FFFFFF"
+        
+    # Default fallback
+    return COLORS.get("text", "#212121")
 
 
 def _create_intersection_heatmap(
     df: pd.DataFrame,
     dimension_map: dict,
+    color_scheme: str = "Blues",
 ) -> go.Figure:
     """
-    Create a Plotly heatmap for the intersection matrix with dynamic text colors.
-
-    Dynamic text color:
-        Each cell's text color is set independently based on the cell value
-        relative to the max.  Dark cells get white text; light cells get
-        dark text.  This is done via a per-cell font color array passed
-        to Plotly's textfont parameter.
+    Create a Plotly heatmap for the intersection matrix with dynamic text colors and selectable palettes.
+    Zeroes are filtered out to render completely white and background-free constraints.
     """
     labels = list(df.columns)
     raw_values = df.values.copy().astype(float)
 
-    # Replace excluded cells (-1) with NaN for Plotly rendering
     display_values = raw_values.copy()
     display_values[display_values == EXCLUDED_PAIR_VALUE] = np.nan
     display_values[display_values == SAME_VARIANT_VALUE] = np.nan
-    display_values[display_values == LOWER_TRIANGLE_VALUE] = np.nan
+    display_values[display_values == UPPER_TRIANGLE_VALUE] = np.nan
 
-    # Compute max for dynamic text color thresholding
-    valid_values = raw_values[~np.isin(raw_values, [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, LOWER_TRIANGLE_VALUE])]
+    valid_values = raw_values[~np.isin(raw_values, [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE])]
     max_val = float(np.nanmax(valid_values)) if len(valid_values) > 0 else 1.0
+
+    import plotly.colors as pc
+    base_colors = pc.get_colorscale(color_scheme)
+    if max_val > 0:
+        custom_colorscale = [[0.0, '#FFFFFF'], [0.000001, base_colors[0][1]]] + [[v[0], v[1]] for v in base_colors[1:]]
+    else:
+        custom_colorscale = color_scheme
 
     # Custom hover text
     hover_text = []
@@ -322,15 +350,8 @@ def _create_intersection_heatmap(
         row_texts = []
         for j, col_label in enumerate(labels):
             val = raw_values[i][j]
-            if val == SAME_VARIANT_VALUE:
-                row_texts.append("Same variant (Diagonal omission)")
-            elif val == LOWER_TRIANGLE_VALUE:
+            if val in [SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE, EXCLUDED_PAIR_VALUE] or np.isnan(val):
                 row_texts.append("")
-            elif val == EXCLUDED_PAIR_VALUE:
-                dim = dimension_map.get(row_label, "?")
-                row_texts.append(
-                    f"{row_label} × {col_label}: EXCLUDED (same dimension: {dim})"
-                )
             else:
                 row_texts.append(f"{row_label} ∩ {col_label}: {int(val)} papers")
         hover_text.append(row_texts)
@@ -347,15 +368,11 @@ def _create_intersection_heatmap(
             val = raw_values[i][j]
             text = ""
             font_color = COLORS["text_muted"]
-            if val == EXCLUDED_PAIR_VALUE:
-                text = "×"
-            elif val == SAME_VARIANT_VALUE:
-                text = "—"
-            elif val == LOWER_TRIANGLE_VALUE:
-                text = "" # leave empty
+            if val in [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE] or np.isnan(val):
+                text = ""
             else:
                 text = str(int(val))
-                font_color = _get_dynamic_text_color(val, max_val)
+                font_color = _get_dynamic_text_color(val, max_val, color_scheme)
 
             if text:
                 annotations.append(dict(
@@ -372,30 +389,42 @@ def _create_intersection_heatmap(
         z=display_values,
         x=labels,
         y=labels,
+        xgap=1,
+        ygap=1,
         hovertext=hover_text,
         hoverinfo="text",
-        colorscale=HEATMAP_COLORSCALE,
+        colorscale=custom_colorscale,
         showscale=True,
         colorbar=dict(title="Count"),
         hoverongaps=False
         # No texttemplate — we use layout annotations for per-cell colors
     ))
 
+    size = max(500, len(labels) * 22 + 250)
+
     fig.update_layout(
-        height=len(labels) * 20 + 300,
-        width=len(labels) * 20 + 300,
+        height=size,
+        width=size,
         font=dict(family="Inter, sans-serif"),
         annotations=annotations,
         xaxis=dict(
+            tickmode="array",
+            tickvals=labels,
+            ticktext=labels,
             tickangle=45,
             side="bottom",
             tickfont=dict(size=9),
             automargin=True,
         ),
         yaxis=dict(
+            tickmode="array",
+            tickvals=labels,
+            ticktext=labels,
             autorange="reversed",
             tickfont=dict(size=9),
             automargin=True,
+            scaleanchor="x",
+            scaleratio=1,
         ),
         margin=dict(l=150, r=50, t=50, b=150),
         plot_bgcolor=COLORS["surface"],
@@ -536,25 +565,11 @@ def _render_research_gaps(computer: MatrixComputer, dimension_map: dict):
     )
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Manual Validation (Single + Pair)
-# ═══════════════════════════════════════════════════════════════════════════
-#
-# Two sub-sections:
-#   1. Single Variant Validation:
-#      Override whether a variant is "present" or "absent" in a paper.
-#
-#   2. Pair Validation (NEW):
-#      Confirm that a paper discusses a specific combination of two variants.
-#      This forces both variants to present for that paper, so the
-#      intersection count increases.
-#
-# Both save immediately, recompute the matrices live, and update the
-# session state so all tabs reflect the change without a full re-run.
+# ── Detection Overrides (Single + Pair) ───────────────────────────────────
 
-def _render_manual_validation(df: pd.DataFrame, computer: MatrixComputer):
-    """Render manual validation: single variants + variant pairs."""
-    st.markdown(sub_header("tune", "Manual Validation"), unsafe_allow_html=True)
+def _render_detection_overrides(df: pd.DataFrame, computer: MatrixComputer):
+    """Render detection overrides: single variants + variant pairs."""
+    st.markdown(sub_header("tune", "Detection Overrides"), unsafe_allow_html=True)
     st.caption(
         "Override automatic detection results. Changes apply immediately - "
         "matrices, drill-downs, and CSV exports update in real time."
@@ -572,12 +587,186 @@ def _render_manual_validation(df: pd.DataFrame, computer: MatrixComputer):
         _render_pair_validation(df, computer)
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Manual Validation & Research Fertility
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _render_manual_validation(intersection_df: pd.DataFrame, validator: ConceptualValidator, dimension_map: dict):
+    """Redesigned Manual Validation & Research Fertility system."""
+    st.markdown(sub_header("verified", "Manual Validation & Research Fertility"), unsafe_allow_html=True)
+    st.caption("Rate variant relationships, measure reliability, and identify research opportunities.")
+
+    # 1. Author Configuration
+    st.markdown("### SECTION 1 — Author Configuration")
+    num_authors = st.number_input("Number of Authors (Raters)", min_value=1, max_value=10, value=len(validator.authors), step=1)
+    
+    auth_cols = st.columns(3)
+    new_names = []
+    for i in range(num_authors):
+        current_name = validator.authors[i] if i < len(validator.authors) else f"Author {i+1}"
+        with auth_cols[i % 3]:
+            name = st.text_input(f"Author {i+1} Name", value=current_name, key=f"auth_name_{i}")
+            new_names.append(name)
+            
+    if new_names != validator.authors:
+        if st.button("Update Author Configuration"):
+            validator.update_config(new_names)
+            st.success("Configuration updated!")
+            st.rerun()
+
+    st.divider()
+
+    # 2. Rating Table / CSV Upload
+    st.markdown("### SECTION 2 — Rating Table / CSV Upload")
+    
+    sub_up, sub_table = st.tabs(["CSV Upload", "Interactive Table"])
+    
+    pairs = validator.get_all_pairs()
+    
+    with sub_table:
+        st.markdown("#### Rate Variant Combinations")
+        st.caption("R = Relevant, N = Not relevant, ? = Uncertain")
+        
+        data = []
+        for v1, v2 in pairs:
+            row = {"Variant A": v1, "Variant B": v2}
+            r_dict = validator.get_ratings(v1, v2)
+            for a in validator.authors:
+                row[a] = r_dict.get(a, "?")
+            data.append(row)
+        
+        df_editor = pd.DataFrame(data)
+        col_config = {a: st.column_config.SelectboxColumn(a, options=["R", "N", "?"], required=True) for a in validator.authors}
+        
+        edited_df = st.data_editor(
+            df_editor,
+            column_config=col_config,
+            disabled=["Variant A", "Variant B"],
+            hide_index=True,
+            use_container_width=True,
+            key="fertility_editor_multi"
+        )
+        
+        c1, c2 = st.columns(2)
+        if c1.button("Save Manual Ratings", type="primary"):
+            validator.bulk_update(edited_df)
+            st.success("Ratings saved!")
+            st.rerun()
+            
+        csv_template = edited_df.to_csv(index=False)
+        c2.download_button("Download Rating Template CSV", data=csv_template, file_name="rating_template.csv", mime="text/csv")
+
+    with sub_up:
+        st.markdown("#### Bulk Upload Ratings")
+        st.info("Upload a CSV containing 'Variant A', 'Variant B' and author columns.")
+        uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+        if uploaded_file is not None:
+            try:
+                up_df = pd.read_csv(uploaded_file)
+                if st.button("Process Uploaded CSV"):
+                    validator.bulk_update(up_df)
+                    st.success("Ratings imported successfully!")
+                    st.rerun()
+            except Exception as e:
+                st.error(f"Error parsing CSV: {e}")
+
+    st.divider()
+
+    # 3. Inter-Rater Reliability
+    st.markdown("### SECTION 3 — Inter-Rater Reliability")
+    alpha = validator.compute_reliability()
+    
+    c1, _ = st.columns([1, 2])
+    c1.metric("Krippendorff Alpha", alpha)
+    
+    if alpha > 0.8:
+        st.success("**Excellent agreement** (Alpha > 0.8)")
+    elif alpha >= 0.7:
+        st.info("**Acceptable agreement** (Alpha 0.7 - 0.8)")
+    else:
+        st.warning("**Low agreement** (Alpha < 0.7)")
+    
+    st.caption("Alpha measures the agreement between raters considering chance. 1.0 is perfect, 0.0 is chance.")
+
+    st.divider()
+
+    # 4. Opportunity Matrix
+    st.markdown("### SECTION 4 — Opportunity Matrix")
+    st.caption("Showing pairs marked 'Relevant' (majority) but with 0 existing papers.")
+    
+    # Compute Final Ratings and Opportunities
+    results = []
+    opportunity_pairs = []
+    
+    # Optimization: pre-calculate everything for CSV summary later
+    for v1, v2 in pairs:
+        final = validator.get_majority_rating(v1, v2)
+        count = intersection_df.loc[v1, v2]
+        is_opp = (final == "R" and count == 0)
+        results.append({
+            "Variant A": v1, "Variant B": v2, "Final Rating": final, 
+            "Paper Count": count, "Is Opportunity": is_opp
+        })
+        if is_opp: opportunity_pairs.append((v1, v2))
+            
+    res_df = pd.DataFrame(results)
+    
+    # Create the Opportunity Matrix (Lower Triangle)
+    opp_matrix = intersection_df.copy()
+    for i, r_label in enumerate(intersection_df.index):
+        for j, c_label in enumerate(intersection_df.columns):
+            if j >= i: continue # Mask upper + diag
+            
+            final_rating = validator.get_majority_rating(r_label, c_label)
+            count = intersection_df.iloc[i, j]
+            if final_rating == "R" and count == 0:
+                opp_matrix.iloc[i, j] = 0.0 # It's an opportunity
+            else:
+                opp_matrix.iloc[i, j] = np.nan # Blank/Masked
+
+    color_scheme = st.session_state.get("heatmap_color_scheme", "Blues")
+    fig = _create_intersection_heatmap(opp_matrix, dimension_map, color_scheme)
+    st.plotly_chart(fig, use_container_width=True, key="opportunity_heatmap")
+    
+    st.download_button("Download Opportunity Matrix CSV", data=opp_matrix.to_csv(), file_name="opportunity_matrix.csv")
+
+    st.divider()
+
+    # 5. Fertility Ratio
+    st.markdown("### SECTION 5 — Research Fertility Ratio")
+    total_possible = len(pairs)
+    opp_count = len(opportunity_pairs)
+    ratio = opp_count / total_possible if total_possible > 0 else 0
+    
+    f1, f2, f3 = st.columns(3)
+    f1.metric("Total Possible Pairs", total_possible)
+    f2.metric("Research Opportunities", opp_count)
+    f3.metric("Fertility Ratio", f"{ratio:.3f}")
+    
+    if ratio > 0.5:
+        st.success("Large unexplored research space (Ratio > 0.5)")
+    elif ratio > 0.2:
+        st.info("Moderate research opportunities (Ratio 0.2 - 0.5)")
+    else:
+        st.warning("Research area getting saturated (Ratio < 0.2)")
+
+    # Export All
+    st.markdown("#### Export Fertility Analysis")
+    sum_data = {
+        "Metric": ["Krippendorff Alpha", "Total Pairs", "Opportunity Count", "Fertility Ratio"],
+        "Value": [alpha, total_possible, opp_count, ratio]
+    }
+    sum_csv = pd.DataFrame(sum_data).to_csv(index=False)
+    
+    col_dl1, col_dl2 = st.columns(2)
+    col_dl1.download_button("Download Ratings Summary Table", data=res_df.to_csv(index=False), file_name="fertility_ratings_summary.csv")
+    col_dl2.download_button("Download Fertility Analysis Summary (Stats)", data=sum_csv, file_name="fertility_analysis_summary.csv")
+
+
 def _render_single_override(df: pd.DataFrame, computer: MatrixComputer):
     """Allow manual override of individual variant detection results."""
     paper_ids = list(df.index)
     variant_names = list(df.columns)
-
-    # Show filename reference for the selected paper
     id_map = st.session_state.get("paper_id_map", {})
 
     col1, col2 = st.columns(2)
@@ -610,16 +799,11 @@ def _render_single_override(df: pd.DataFrame, computer: MatrixComputer):
         if new_value != current_value:
             if st.button("Save Override", type="primary", key="save_single_override"):
                 computer.set_override(selected_paper, selected_variant, new_value)
-                # Live recompute: update both matrices and re-export CSVs
                 computer.apply_overrides_and_recompute()
                 _sync_session_state(computer)
-                st.success(
-                    f"Override saved: {selected_paper} × {selected_variant} "
-                    f"= {'Present' if new_value else 'Absent'}"
-                )
+                st.success(f"Override saved: {selected_paper} × {selected_variant} = {'Present' if new_value else 'Absent'}")
                 st.rerun()
 
-    # Show existing overrides
     st.divider()
     overrides = computer.get_overrides()
     if overrides:
@@ -632,8 +816,7 @@ def _render_single_override(df: pd.DataFrame, computer: MatrixComputer):
                     "Variant": var_name,
                     "Override Value": "Present" if val else "Absent",
                 })
-        override_df = pd.DataFrame(override_rows)
-        st.dataframe(override_df, use_container_width=True)
+        st.dataframe(pd.DataFrame(override_rows), use_container_width=True)
 
         if st.button("Clear All Single Overrides", key="clear_single_overrides"):
             from config.settings import MANUAL_OVERRIDES_FILE
@@ -649,121 +832,53 @@ def _render_single_override(df: pd.DataFrame, computer: MatrixComputer):
 
 
 def _render_pair_validation(df: pd.DataFrame, computer: MatrixComputer):
-    """
-    Allow manual validation of variant pairs (combinations).
-
-    How Pair Validation Works:
-        1. User selects a Paper ID (P1, P2, ...) and two variants.
-        2. Clicking "Save Pair Validation" stores the pair override
-           and forces both variants to "present" for that paper.
-        3. The paper-variant matrix is updated, the intersection matrix
-           is recomputed, and CSVs are re-exported — all instantly.
-        4. The intersection count for that variant pair increases.
-
-    The pair override persists across sessions in pair_overrides.json.
-    """
+    """Allow manual validation of variant pairs (combinations)."""
     paper_ids = list(df.index)
     variant_names = list(df.columns)
     id_map = st.session_state.get("paper_id_map", {})
     dimension_map = st.session_state.get("dimension_map", {})
 
     st.markdown("#### Validate a Variant Pair")
-    st.caption(
-        "Confirm that a paper discusses **both** variants. "
-        "This will update the binary matrix and the intersection count."
-    )
-
     col1, col2, col3 = st.columns(3)
     with col1:
-        pair_paper = st.selectbox(
-            "Select Paper",
-            paper_ids,
-            key="pair_val_paper",
-        )
+        pair_paper = st.selectbox("Select Paper", paper_ids, key="pair_val_paper")
         if pair_paper and pair_paper in id_map:
             st.caption(f"File: {id_map[pair_paper]}")
     with col2:
-        pair_va = st.selectbox(
-            "Variant A",
-            variant_names,
-            key="pair_val_va",
-        )
-        if pair_va:
-            dim_a = dimension_map.get(pair_va, "-")
-            st.caption(f"Dimension: {dim_a}")
+        pair_va = st.selectbox("Variant A", variant_names, key="pair_val_va")
+        if pair_va: st.caption(f"Dimension: {dimension_map.get(pair_va, '-')}")
     with col3:
-        pair_vb = st.selectbox(
-            "Variant B",
-            variant_names,
-            key="pair_val_vb",
-        )
-        if pair_vb:
-            dim_b = dimension_map.get(pair_vb, "-")
-            st.caption(f"Dimension: {dim_b}")
+        pair_vb = st.selectbox("Variant B", variant_names, key="pair_val_vb")
+        if pair_vb: st.caption(f"Dimension: {dimension_map.get(pair_vb, '-')}")
 
     if pair_paper and pair_va and pair_vb:
         if pair_va == pair_vb:
             st.warning("Please select two different variants.")
         elif computer.is_same_dimension_pair(pair_va, pair_vb):
-            st.warning(
-                f"'{pair_va}' and '{pair_vb}' belong to the same dimension. "
-                f"Same-dimension pairs are excluded from the VIM."
-            )
+            st.warning(f"Same-dimension pairs are excluded.")
         else:
-            # Show current status
             va_present = bool(df.at[pair_paper, pair_va])
             vb_present = bool(df.at[pair_paper, pair_vb])
-            both_present = va_present and vb_present
-
-            status_a = "Present" if va_present else "Not detected"
-            status_b = "Present" if vb_present else "Not detected"
-
-            st.markdown(
-                f"- **{pair_va}** in {pair_paper}: {status_a}\n"
-                f"- **{pair_vb}** in {pair_paper}: {status_b}"
-            )
-
-            if both_present:
-                st.info("This pair is already detected in this paper.")
-            else:
-                st.warning(
-                    "One or both variants are not currently detected. "
-                    "Saving will force both to 'Present'."
-                )
-
-            if st.button(
-                f"Save Pair Validation: {pair_va} + {pair_vb} in {pair_paper}",
-                type="primary",
-                key="save_pair_override",
-            ):
+            if st.button(f"Save Pair Validation", type="primary", key="save_pair_override"):
                 computer.set_pair_override(pair_paper, pair_va, pair_vb)
-                # Live recompute: update both matrices and re-export CSVs
                 computer.apply_overrides_and_recompute()
                 _sync_session_state(computer)
-                st.success(
-                    f"Pair validated: **{pair_paper}** contains both "
-                    f"**{pair_va}** and **{pair_vb}**."
-                )
+                st.success(f"Pair validated in {pair_paper}.")
                 st.rerun()
 
-    # ── Show existing pair overrides ─────────────────────────────────
     st.divider()
     pair_overrides = computer.get_pair_overrides()
     if pair_overrides:
         st.markdown(sub_header("link", "Current Pair Validations"), unsafe_allow_html=True)
         pair_rows = []
         for pid, pairs in pair_overrides.items():
-            fname = id_map.get(pid, "")
             for pair in pairs:
                 pair_rows.append({
                     "Paper": pid,
-                    "Filename": fname,
                     "Variant A": pair[0],
                     "Variant B": pair[1],
                 })
-        pair_df = pd.DataFrame(pair_rows)
-        st.dataframe(pair_df, use_container_width=True)
-
+        st.dataframe(pd.DataFrame(pair_rows), use_container_width=True)
         if st.button("Clear All Pair Validations", key="clear_pair_overrides"):
             computer.clear_all_pair_overrides()
             computer.apply_overrides_and_recompute()
@@ -828,3 +943,85 @@ def _render_download_results():
             id_map = st.session_state.paper_id_map
             for pid, fname in sorted(id_map.items(), key=lambda x: int(x[0][1:])):
                 st.markdown(f"**{pid}** -> {fname}")
+
+@st.cache_data(show_spinner=False)
+def _generate_static_heatmap(df: pd.DataFrame, dimension_map: dict, color_scheme: str = "Blues", format: str = "png") -> bytes:
+    """
+    Generate a static matplotlib heatmap matching the visual style of Plotly.
+    Zeroes are filtered out to render completely white and background-free constraints.
+    Uses standard seaborn palettes dynamically linked.
+    """
+    labels = list(df.columns)
+    raw_values = df.values.copy().astype(float)
+
+    display_values = raw_values.copy()
+    display_values[display_values == EXCLUDED_PAIR_VALUE] = np.nan
+    display_values[display_values == SAME_VARIANT_VALUE] = np.nan
+    display_values[display_values == UPPER_TRIANGLE_VALUE] = np.nan
+
+    valid_values = raw_values[~np.isin(raw_values, [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE])]
+    max_val = float(np.nanmax(valid_values)) if len(valid_values) > 0 else 1.0
+
+    import copy
+    import matplotlib.pyplot as plt
+
+    # Create the figure
+    size = max(10, len(labels) * 0.4)
+    fig, ax = plt.subplots(figsize=(size + 2, size), dpi=150)
+    
+    # Generate labels array for annotations
+    annot = np.empty_like(raw_values, dtype='<U10')
+    for i in range(len(labels)):
+        for j in range(len(labels)):
+            val = raw_values[i][j]
+            if val == EXCLUDED_PAIR_VALUE: annot[i, j] = ""
+            elif val == SAME_VARIANT_VALUE: annot[i, j] = ""
+            elif val == UPPER_TRIANGLE_VALUE: annot[i, j] = ""
+            else: annot[i, j] = str(int(val))
+    
+    # We pass the NaNs to matplotlib to show them blank, but we need the background color
+    ax.set_facecolor(COLORS["surface"] if "surface" in COLORS else "#FFFFFF")
+
+    # Matplotlib expects specific casing for colormap names, while Plotly accepts Title Case.
+    cmap_mapping = {
+        "Blues": "Blues",
+        "Viridis": "viridis",
+        "Plasma": "plasma",
+        "Greys": "Greys",
+        "Cividis": "cividis"
+    }
+    mpl_cmap = cmap_mapping.get(color_scheme, color_scheme)
+    
+    base_cmap = copy.copy(plt.get_cmap(mpl_cmap))
+    base_cmap.set_under('#FFFFFF')
+
+    # Plot seaborn heatmap utilizing matplotlib's literal standard string palette maps.
+    sns.heatmap(
+        display_values, 
+        cmap=base_cmap,
+        annot=annot,
+        fmt="",
+        cbar_kws={'label': 'Count'},
+        xticklabels=labels,
+        yticklabels=labels,
+        ax=ax,
+        mask=np.isnan(display_values),
+        vmin=0.001, 
+        vmax=max_val if max_val > 0 else 1,
+        square=True,
+        linewidths=1,
+        linecolor='#E0E0E0'
+    )
+    
+    # Adjust tick labels
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right', fontsize=9, family='sans-serif')
+    ax.set_yticklabels(ax.get_yticklabels(), rotation=0, fontsize=9, family='sans-serif')
+    
+    # Adjust axes
+    plt.tight_layout()
+    
+    # Save to buffer
+    buf = BytesIO()
+    fig.savefig(buf, format=format, bbox_inches='tight', facecolor='white', transparent=False)
+    plt.close(fig)
+    return buf.getvalue()

@@ -137,8 +137,8 @@ with st.sidebar:
         )
 
     st.divider()
-    st.caption("Built for research paper analysis")
-    st.caption("Using Variant Intersection Matrices")
+    st.caption("Variant Intersection Matrix Analyzer")
+    st.caption("Academic Research Tool")
 
 
 # ═══════════════════════════════════════════════════════════════════════════

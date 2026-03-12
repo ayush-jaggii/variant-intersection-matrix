@@ -4,15 +4,17 @@ from PyInstaller.utils.hooks import copy_metadata
 
 datas = [('data', 'data'), ('interface', 'interface'), ('core', 'core'), ('config', 'config'), ('utils', 'utils')]
 binaries = []
-hiddenimports = ['streamlit', 'pandas', 'numpy', 'pymupdf', 'fitz', 'pdfplumber', 'streamlit.runtime.scriptrunner.magic_funcs']
+hiddenimports = ['streamlit', 'pandas', 'numpy', 'pymupdf', 'fitz', 'pdfplumber', 'streamlit.runtime.scriptrunner.magic_funcs', 'seaborn', 'matplotlib']
 datas += copy_metadata('streamlit')
 tmp_ret = collect_all('streamlit')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('fitz')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
-tmp_ret = collect_all('kaleido')
-datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 tmp_ret = collect_all('plotly')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('seaborn')
+datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
+tmp_ret = collect_all('matplotlib')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
@@ -56,5 +58,5 @@ app = BUNDLE(
     exe,
     name='VIM_Analyzer.app',
     icon=None,
-    bundle_identifier='com.ayushjaggi.vimanalyzer',
+    bundle_identifier=None,
 )

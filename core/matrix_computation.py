@@ -85,7 +85,7 @@ logger = logging.getLogger(__name__)
 # These cells are excluded from counting, gaps analysis, etc.
 EXCLUDED_PAIR_VALUE = -1
 SAME_VARIANT_VALUE = -2
-LOWER_TRIANGLE_VALUE = -3
+UPPER_TRIANGLE_VALUE = -3
 
 @st.cache_data(show_spinner=False)
 def _cached_build_base_matrix(
@@ -98,7 +98,8 @@ def _cached_build_base_matrix(
 
     df = pd.DataFrame.from_dict(rows, orient="index", columns=variant_names)
     df.index.name = "paper_id"
-    return df.sort_index()
+    # Sort paper_id numerically (e.g. '1', '10', 'P2', 'P21' -> 1, 10, 2, 21)
+    return df.sort_index(key=lambda idx: pd.to_numeric(idx.str.extract(r'(\d+)', expand=False), errors='coerce').fillna(0))
 
 
 @st.cache_data(show_spinner=False)
@@ -121,8 +122,8 @@ def _cached_compute_intersection(
         for j in range(n):
             if i == j:
                 result.iloc[i, j] = SAME_VARIANT_VALUE
-            elif j < i:
-                result.iloc[i, j] = LOWER_TRIANGLE_VALUE
+            elif j > i:
+                result.iloc[i, j] = UPPER_TRIANGLE_VALUE
             else:
                 vi = variant_names[i]
                 vj = variant_names[j]
@@ -252,9 +253,19 @@ class MatrixComputer:
             self.dimension_map or {}
         )
 
-        self.intersection_df = result
-        logger.info("Intersection matrix computed: %s", result.shape)
-        return result
+        valid_mask = (result > 0)
+        has_value = valid_mask.any(axis=1) | valid_mask.any(axis=0)
+        variants_to_keep = result.columns[has_value]
+
+        if len(variants_to_keep) < len(result.columns):
+            logger.info("Dropping %d variants with only zero/blank/null values.", len(result.columns) - len(variants_to_keep))
+            self.intersection_df = result.loc[variants_to_keep, variants_to_keep]
+            self.paper_variant_df = self.paper_variant_df[variants_to_keep]
+        else:
+            self.intersection_df = result
+
+        logger.info("Intersection matrix computed: %s", self.intersection_df.shape)
+        return self.intersection_df
 
     def apply_overrides_and_recompute(self):
         """
@@ -359,7 +370,7 @@ class MatrixComputer:
         gaps = []
         variants = list(self.intersection_df.columns)
         for i, va in enumerate(variants):
-            for j in range(i + 1, len(variants)):
+            for j in range(i):
                 vb = variants[j]
                 value = self.intersection_df.iloc[i, j]
                 # Skip excluded pairs (same dimension) and only
@@ -390,7 +401,7 @@ class MatrixComputer:
         rows = []
 
         for i, va in enumerate(variant_names):
-            for j in range(i + 1, len(variant_names)):
+            for j in range(i):
                 vb = variant_names[j]
                 count = int(self.intersection_df.iloc[i, j])
 
@@ -619,26 +630,30 @@ class MatrixComputer:
 
         if self.paper_variant_df is not None:
             path = output_dir / PAPER_VARIANT_MATRIX_CSV
-            self.paper_variant_df.to_csv(path)
+            self.paper_variant_df.to_csv(path, encoding="utf-8")
             logger.info("Exported: %s", path)
 
         if self.intersection_df is not None:
             path = output_dir / VARIANT_INTERSECTION_MATRIX_CSV
-            # Replace -1 with "EXCLUDED" in the CSV for clarity
-            export_df = self.intersection_df.copy()
-            export_df = export_df.replace(EXCLUDED_PAIR_VALUE, "EXCLUDED")
-            export_df.to_csv(path)
+            # Replace placeholder values with blanks in the CSV for clarity
+            export_df = self.intersection_df.copy().astype(object)
+            export_df = export_df.replace({
+                EXCLUDED_PAIR_VALUE: "",
+                SAME_VARIANT_VALUE: "",
+                UPPER_TRIANGLE_VALUE: ""
+            })
+            export_df.to_csv(path, encoding="utf-8")
             logger.info("Exported: %s", path)
 
             pair_df = self.generate_pair_details()
             path = output_dir / PAIR_DETAILS_CSV
-            pair_df.to_csv(path, index=False)
+            pair_df.to_csv(path, index=False, encoding="utf-8")
             logger.info("Exported: %s", path)
             
             details_df = self.generate_detection_details()
             if not details_df.empty:
                 path = output_dir / "detection_details.csv"
-                details_df.to_csv(path, index=False)
+                details_df.to_csv(path, index=False, encoding="utf-8")
                 logger.info("Exported: %s", path)
 
     # ── Internal ─────────────────────────────────────────────────────────

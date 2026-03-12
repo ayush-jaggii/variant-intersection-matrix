@@ -1,140 +1,121 @@
-# 🔬 Variant Intersection Matrix Analyzer
+# Variant Intersection Matrix Analyzer (VIM Analyzer)
 
-A structured Python system for analyzing research papers using a **Variant Intersection Matrix**. The system detects predefined variants (with alternate_names) across academic papers and computes pairwise intersection counts to identify research coverage and gaps.
+A professional research analysis tool for identifying variant intersections, systematic research gaps, and opportunity spaces in academic literature datasets.
 
 ---
 
-## 🏗️ Architecture
+## Overview
 
-```
-┌──────────────┐     ┌──────────────────┐     ┌────────────────────┐
-│  PDF Papers  │────▶│  Text Extraction │────▶│   Preprocessing    │
-└──────────────┘     └──────────────────┘     └────────┬───────────┘
-                                                       │
-┌──────────────┐                                       ▼
-│   Variant    │────▶┌──────────────────┐     ┌────────────────────┐
-│ Definitions  │     │ Variant Detection│◀────│  Preprocessed Text │
-└──────────────┘     └────────┬─────────┘     └────────────────────┘
-                              │
-                              ▼
-                    ┌──────────────────┐     ┌────────────────────┐
-                    │ Paper × Variant  │────▶│  Intersection      │
-                    │  Binary Matrix   │     │  Matrix (M.T @ M)  │
-                    └──────────────────┘     └────────┬───────────┘
-                                                      │
-                                                      ▼
-                                             ┌────────────────────┐
-                                             │  Streamlit UI      │
-                                             │  • Heatmaps        │
-                                             │  • Drill-downs     │
-                                             │  • Research Gaps   │
-                                             │  • CSV Export       │
-                                             └────────────────────┘
-```
+The **Variant Intersection Matrix Analyzer (VIM Analyzer)** is designed to assist researchers in performing systematic literature reviews and conceptual mapping. By analyzing collections of academic papers against a predefined set of conceptual variants, the software constructs a **Variant Intersection Matrix**. 
 
-## 📁 Project Structure
+This matrix quantifies how frequently specific conceptual combinations appear together in the literature, enabling researchers to identify:
+- **Existing Research Clusters**: Well-explored areas with high intersection counts.
+- **Unexplored Combinations**: Pairs of variants that are conceptually relevant but lack supporting literature.
+- **Research Opportunity Spaces**: Potential gaps where new research can provide the most significant contributions.
 
-```
-Model/
-├── config/
-│   ├── __init__.py
-│   └── settings.py              # Centralized configuration
-├── core/
-│   ├── __init__.py
-│   ├── text_extraction.py       # PDF → raw text (pdfplumber)
-│   ├── preprocessing.py         # Text normalization & cleaning
-│   ├── variant_detection.py     # Variant presence detection
-│   └── matrix_computation.py    # Matrix operations & export
-├── data/
-│   ├── papers/                  # Uploaded PDFs
-│   ├── variants/                # Variant definitions (JSON)
-│   ├── output/                  # Generated CSVs
-│   └── cache/                   # Extracted text cache
-├── interface/
-│   ├── __init__.py
-│   ├── app.py                   # Main Streamlit application
-│   └── components/
-│       ├── __init__.py
-│       ├── paper_manager.py     # Paper upload & management
-│       ├── variant_manager.py   # Variant/alternate_name CRUD
-│       ├── analysis_runner.py   # Analysis orchestration
-│       └── matrix_viewer.py     # Interactive matrix display
-├── utils/
-│   ├── __init__.py
-│   └── helpers.py               # Shared utility functions
-├── requirements.txt
-├── README.md
-└── run.py                       # Entry point
-```
+---
 
-## 🚀 Quick Start
+## System Architecture
 
-### 1. Install Dependencies
+The VIM Analyzer follows a structured analytical pipeline to ensure reproducibility and statistical rigor.
 
+### 1. Paper Processing
+The system ingests papers in PDF or TXT format. The processing involves:
+- **PDF Text Extraction**: High-fidelity extraction of textual content.
+- **Keyword & Variant Detection**: Substring matching against a dictionary of variants and their synonyms (alternate names).
+- **Normalization**: Text is cleaned (Unicode normalization, lowercase, noise removal) to ensure matching accuracy.
+
+### 2. Paper × Variant Binary Matrix
+Each processed paper is converted into a binary representation:
+- **Rows**: Individual papers (P1, P2, ...).
+- **Columns**: Defined variants.
+- **Values**: `1` if the variant is detected in the paper, `0` otherwise.
+
+### 3. Variant Intersection Matrix
+The system computes pairwise intersections between variants to identify co-occurrences.
+- **Intersection Count**: Computed as the number of papers containing both variants in a pair.
+- **Structural Rules**:
+    - **Diagonal**: Excluded (self-comparison).
+    - **Intra-Dimension Pairs**: Excluded (variants belonging to the same category are treated as mutually exclusive).
+    - **Lower Triangular Matrix**: Valid intersections are displayed in the lower triangle for clarity.
+
+### 4. Heatmap Visualization
+The results are presented as an interactive heatmap with the following features:
+- **Triangular Display**: Focuses on unique pairwise relationships.
+- **Numeric Annotations**: Direct display of intersection counts.
+- **Dynamic Scaling**: The color intensity adjusts based on the maximum intersection count.
+- **Customization**: Support for multiple color palettes (e.g., Viridis, Blues, Magma).
+- **Image Export**: High-resolution PNG/JPEG download for publication.
+
+### 5. CSV Export
+Standardized data formats are provided for external analysis:
+- **Variant Intersection Matrix (CSV)**: Preserves the full structural data, including excluded markers.
+- **Pair Details (CSV)**: A flat file listing every valid pair, its count, and the specific papers (IDs) that form the intersection.
+
+### 6. Manual Validation Matrix
+Domain experts can refine the analytical results through a manual validation layer:
+- **R (Relevant)**: The relationship is conceptually meaningful.
+- **N (Not Relevant)**: The relationship is logically or theoretically invalid.
+- **? (Uncertain)**: Requires further investigation.
+
+### 7. Fertility Analysis
+The **Research Fertility Ratio** quantifies the "promise" of a research area by comparing viable opportunities to the total theoretically possible combinations.
+- **Total Possible Pairs**: Calculated as `N(N-1) / 2`.
+- **Viable Pairs**: Combinations not marked as `N` or `?`.
+- **Research Fertility Ratio**: `Viable_Pairs / Total_Possible_Pairs`.
+
+### 8. Multi-Author Validation
+For rigorous academic research, the system supports collaborative rating:
+- Individual researchers can upload their own validation CSVs.
+- The system aggregates multiple rater matrices.
+- Majority voting logic is used to determine final consensus ratings.
+
+### 9. Inter-Rater Reliability
+To validate the consistency of manual classifications, the tool computes **Krippendorff’s Alpha** (Nominal):
+- **> 0.80**: Strong agreement.
+- **0.70 - 0.80**: Acceptable reliability.
+- **< 0.67**: Weak reliability.
+This ensures that the resulting research gap analysis is statistically sound and suitable for peer-reviewed publication.
+
+---
+
+## Features
+- **Automatic Variant Detection**: High-speed processing of large document sets.
+- **Inter-Dimension Filtering**: Automatically filters out invalid intra-category pairings.
+- **Research Gap Identification**: Instantly highlights 0-value intersections in relevant spaces.
+- **Expert Validation**: Layered manual verification for domain-specific accuracy.
+- **Reliability Metrics**: Built-in statistical analysis for multi-author studies.
+- **Export Ready**: Professional visualizations and CSV data for seamless integration into papers.
+
+---
+
+## Running the Software
+
+### Prerequisites
+Ensure you have Python 3.8+ installed.
+
+### Install Dependencies
 ```bash
 pip install -r requirements.txt
 ```
 
-### 2. Launch the Application
-
-**Option A: Run Python Script**
-
+### Launch the Application
+Run the Streamlit interface:
 ```bash
-python run.py
+python launcher.py
 ```
+Alternatively, if using the compiled version, run the `VIM_Analyzer` executable.
 
-Or directly with Streamlit:
+---
 
-```bash
-streamlit run interface/app.py
-```
+## Intended Use
+The VIM Analyzer is designed for:
+- **Systematic Literature Reviews (SLR)**.
+- **Thematic Analysis** in qualitative and mixed-methods research.
+- **Conceptual Framework Development**.
+- **Collaborative Research Validation** and peer-verification.
 
-**Option B: Standalone Executable**
+---
 
-To build a standalone executable (no Python installation required for end users) using PyInstaller:
-
-```bash
-python build_executable.py
-```
-
-The compiled application will be available in the `dist_release/` directory as `VIM_Analyzer`.
-
-### 3. Use the Application
-
-1. **📄 Papers** — Upload your PDF research papers
-2. **🧬 Variants** — Define variants and their alternate_names
-3. **⚙️ Run Analysis** — Execute the detection pipeline
-4. **📊 View Results** — Explore the interactive matrices
-
-## 📊 Outputs
-
-The system generates three CSV files:
-
-| File | Description |
-|------|-------------|
-| `paper_variant_matrix.csv` | Binary matrix showing which variants appear in each paper |
-| `variant_intersection_matrix.csv` | Symmetric matrix of pairwise intersection counts |
-| `pair_details.csv` | Flat listing of all variant pairs with counts and supporting papers |
-
-## ⚡ Performance
-
-- **Batch processing** for PDF extraction (configurable batch size)
-- **File-hash caching** — re-extraction only when PDFs change
-- **Efficient intersection** via matrix multiplication (`M.T @ M`)
-- Handles **150 papers × 54 variants × ~1,431 pairs** efficiently
-
-## ✏️ Manual Validation
-
-The system supports manual overrides:
-- Select a paper and variant
-- Toggle the detection result
-- Overrides persist across sessions
-- Re-run analysis to apply overrides to the matrices
-
-## 🔧 Configuration
-
-All settings are in `config/settings.py`:
-- `PDF_BATCH_SIZE` — papers processed per batch (default: 25)
-- `PRESENCE_THRESHOLD` — minimum occurrences to count as "present"
-- `HEATMAP_COLORSCALE` — Plotly color scale for heatmaps
-- `MAX_PAGES_PER_PAPER` — page limit per PDF (None = all)
+## License
+This tool is released as an open-research software for academic use and reproducibility.

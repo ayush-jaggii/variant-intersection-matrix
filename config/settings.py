@@ -54,6 +54,10 @@ MANUAL_OVERRIDES_FILE = CACHE_DIR / "manual_overrides.json"
 # Format: {"paper_id": [["variant_a", "variant_b"], ...]}
 PAIR_OVERRIDES_FILE = CACHE_DIR / "pair_overrides.json"
 
+# Conceptual validation (whether a combination of two variants is meaningful)
+# Format: {"variant_a|variant_b": "R" | "N" | "?"}
+CONCEPTUAL_VALIDATION_FILE = CACHE_DIR / "conceptual_validation.json"
+
 # ─── Paper Configuration ────────────────────────────────────────────────────
 # Supported file types for research papers
 SUPPORTED_PAPER_EXTENSIONS = [".pdf", ".txt"]
@@ -89,8 +93,8 @@ PAGE_ICON = "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox=
 PAGE_LAYOUT = "wide"
 
 # Matrix heatmap color scale
-HEATMAP_COLORSCALE = [[0, "#EEF1F6"], [0.25, "#93C5E8"], [0.5, "#3B82B0"], [0.75, "#2C4470"], [1, "#1B2A4A"]]
-HEATMAP_ZERO_COLOR = "#F7F8FA"
+HEATMAP_COLORSCALE = [[0, "#FFFFFF"], [1, "#1B2A4A"]]
+HEATMAP_ZERO_COLOR = "#FFFFFF"
 
 # Maximum file upload size in MB
 MAX_UPLOAD_SIZE_MB = 200
