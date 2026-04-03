@@ -92,19 +92,48 @@ This ensures that the resulting research gap analysis is statistically sound and
 ## Running the Software
 
 ### Prerequisites
-Ensure you have Python 3.8+ installed.
+Ensure you have Python 3.9+ installed.
 
-### Install Dependencies
+### Install Dependencies (pip)
 ```bash
 pip install -r requirements.txt
 ```
 
-### Launch the Application
-Run the Streamlit interface:
+### Optional: Create Conda Environment
 ```bash
-python launcher.py
+conda env create -f environment.yml
+conda activate vim-analyzer
 ```
-Alternatively, if using the compiled version, run the `VIM_Analyzer` executable.
+
+### Launch the Application (Recommended)
+Use the launcher entrypoint:
+```bash
+python run.py
+```
+
+This starts Streamlit in background mode and opens the app at:
+
+`http://localhost:8501`
+
+### Alternative Manual Launch
+```bash
+python -m streamlit run interface/app.py --server.headless=true --server.port=8501
+```
+
+### Stop the Application
+If started via `run.py`, stop the running process from terminal:
+
+```bash
+lsof -nP -iTCP:8501 -sTCP:LISTEN
+kill <PID>
+```
+
+### Troubleshooting
+- Port already in use: stop the existing process on port 8501 and relaunch.
+- Browser shows stale page: hard refresh the tab after code updates.
+- First startup can take a few seconds while Streamlit initializes.
+
+If using the compiled version, run the `VIM_Analyzer` executable.
 
 ---
 
