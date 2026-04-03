@@ -162,6 +162,7 @@ class MatrixComputer:
         self.paper_variant_df: Optional[pd.DataFrame] = None
         self.intersection_df: Optional[pd.DataFrame] = None
         self.dimension_map: Dict[str, str] = {}
+        self.paper_metadata: Dict[str, Dict[str, str]] = {}
         self._detection_results_raw: Optional[Dict[str, Dict[str, bool]]] = None
         self._variant_names: List[str] = []
         self._detection_details: Dict[str, Dict[str, str]] = {}
@@ -169,6 +170,10 @@ class MatrixComputer:
         self._pair_overrides: Dict[str, List[List[str]]] = {}
         self._load_overrides()
         self._load_pair_overrides()
+
+    def set_paper_metadata(self, metadata: Dict[str, Dict[str, str]]) -> None:
+        """Set paper metadata map: {paper_id: {title, filename}}."""
+        self.paper_metadata = metadata or {}
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -253,16 +258,10 @@ class MatrixComputer:
             self.dimension_map or {}
         )
 
-        valid_mask = (result > 0)
-        has_value = valid_mask.any(axis=1) | valid_mask.any(axis=0)
-        variants_to_keep = result.columns[has_value]
-
-        if len(variants_to_keep) < len(result.columns):
-            logger.info("Dropping %d variants with only zero/blank/null values.", len(result.columns) - len(variants_to_keep))
-            self.intersection_df = result.loc[variants_to_keep, variants_to_keep]
-            self.paper_variant_df = self.paper_variant_df[variants_to_keep]
-        else:
-            self.intersection_df = result
+        # Keep all configured variants in the matrix, including those with
+        # zero intersections, so the matrix shape remains consistent with the
+        # full variant definition set.
+        self.intersection_df = result
 
         logger.info("Intersection matrix computed: %s", self.intersection_df.shape)
         return self.intersection_df
@@ -353,6 +352,30 @@ class MatrixComputer:
         dim_b = self.dimension_map.get(variant_b, "")
         return bool(dim_a and dim_b and dim_a == dim_b)
 
+    def get_pair_intersection_count(self, variant_a: str, variant_b: str) -> int:
+        """
+        Return the intersection count for a variant pair using the valid
+        lower-triangle cell regardless of the input order.
+
+        This preserves the matrix's storage layout while preventing callers
+        from accidentally reading the upper-triangle sentinel value.
+        """
+        if self.intersection_df is None:
+            return 0
+        if variant_a not in self.intersection_df.columns or variant_b not in self.intersection_df.columns:
+            return 0
+
+        if variant_a == variant_b:
+            return int(self.intersection_df.loc[variant_a, variant_b])
+        if self.is_same_dimension_pair(variant_a, variant_b):
+            return EXCLUDED_PAIR_VALUE
+
+        columns = list(self.intersection_df.columns)
+        idx_a = columns.index(variant_a)
+        idx_b = columns.index(variant_b)
+        row_label, col_label = (variant_a, variant_b) if idx_a > idx_b else (variant_b, variant_a)
+        return int(self.intersection_df.loc[row_label, col_label])
+
     def get_research_gaps(self) -> List[Tuple[str, str]]:
         """
         Identify research gaps: CROSS-DIMENSION variant pairs
@@ -419,6 +442,9 @@ class MatrixComputer:
                     "variant_b": vb,
                     "intersection_count": count,
                     "supporting_papers": "; ".join(papers),
+                    "supporting_titles": "; ".join(
+                        [self.paper_metadata.get(pid, {}).get("title", "") for pid in papers]
+                    ),
                 })
 
         return pd.DataFrame(rows)
@@ -431,9 +457,12 @@ class MatrixComputer:
         rows = []
         if self._detection_details:
             for paper_id, details in self._detection_details.items():
+                meta = self.paper_metadata.get(paper_id, {})
                 for variant_key, term in details.items():
                     rows.append({
                         "paper_id": paper_id,
+                        "paper_title": meta.get("title", ""),
+                        "paper_filename": meta.get("filename", ""),
                         "variant": variant_key,
                         "detected_term": term
                     })
@@ -470,7 +499,7 @@ class MatrixComputer:
             excluded_count = 0
             zero_count = 0
             for i in range(n):
-                for j in range(i + 1, n):
+                for j in range(i):
                     val = self.intersection_df.iloc[i, j]
                     if val == EXCLUDED_PAIR_VALUE:
                         excluded_count += 1
@@ -630,7 +659,20 @@ class MatrixComputer:
 
         if self.paper_variant_df is not None:
             path = output_dir / PAPER_VARIANT_MATRIX_CSV
-            self.paper_variant_df.to_csv(path, encoding="utf-8")
+            export_df = self.paper_variant_df.copy()
+            if self.paper_metadata:
+                export_df.insert(
+                    0,
+                    "paper_filename",
+                    [self.paper_metadata.get(pid, {}).get("filename", "") for pid in export_df.index],
+                )
+                export_df.insert(
+                    0,
+                    "paper_title",
+                    [self.paper_metadata.get(pid, {}).get("title", "") for pid in export_df.index],
+                )
+
+            export_df.to_csv(path, encoding="utf-8")
             logger.info("Exported: %s", path)
 
         if self.intersection_df is not None:

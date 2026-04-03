@@ -51,6 +51,21 @@ from core.conceptual_validation import ConceptualValidator
 from interface.design import section_header, sub_header, icon, COLORS
 
 
+def _get_paper_meta(paper_id: str) -> dict:
+    """Get paper metadata for a paper ID from session state."""
+    meta_map = st.session_state.get("paper_meta_map", {})
+    return meta_map.get(paper_id, {}) if isinstance(meta_map, dict) else {}
+
+
+def _paper_option_label(paper_id: str) -> str:
+    """Format paper selection labels as P-ID | title."""
+    meta = _get_paper_meta(paper_id)
+    title = meta.get("title", "").strip()
+    if title:
+        return f"{paper_id} | {title}"
+    return paper_id
+
+
 def render_matrix_viewer():
     """Render the interactive matrix viewer."""
     st.markdown(section_header("grid_view", "Matrix Viewer"), unsafe_allow_html=True)
@@ -92,7 +107,7 @@ def render_matrix_viewer():
         _render_detection_overrides(paper_variant_df, computer)
 
     with tab_validation:
-        _render_manual_validation(intersection_df, validator, dimension_map)
+        _render_manual_validation(intersection_df, validator, computer, dimension_map)
 
     with tab_download:
         _render_download_results()
@@ -192,7 +207,12 @@ def _render_intersection_matrix(
 
     # Create heatmap with dynamic text colors
     fig = _create_intersection_heatmap(display_df, dimension_map, color_scheme)
-    st.plotly_chart(fig, use_container_width=True, key="intersection_heatmap")
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key="intersection_heatmap",
+        config={"responsive": True},
+    )
 
     # Image download buttons
     st.markdown("Download Heatmap Visualization", unsafe_allow_html=True)
@@ -261,7 +281,7 @@ def _render_intersection_matrix(
             papers = []
         else:
             papers = computer.get_papers_for_pair(va, vb)
-            count = int(intersection_df.loc[va, vb])
+            count = computer.get_pair_intersection_count(va, vb)
             if count > 0:
                 st.success(
                     f"**{count}** paper(s) discuss both **{va}** and **{vb}**:"
@@ -272,11 +292,14 @@ def _render_intersection_matrix(
                 )
 
         if papers:
-            id_map = st.session_state.get("paper_id_map", {})
             details_map = st.session_state.get("detection_details", {})
             for paper_id in papers:
-                fname = id_map.get(paper_id, "")
-                display = f"- **{paper_id}** → {fname}" if fname else f"- `{paper_id}`"
+                meta = _get_paper_meta(paper_id)
+                title = meta.get("title", "")
+                fname = meta.get("filename", "")
+                display = f"- **{paper_id}** → **{title}**" if title else f"- **{paper_id}**"
+                if fname:
+                    display += f" <br>&nbsp;&nbsp;&nbsp;&nbsp;<span style='color:gray; font-size:0.9em'>File: {fname}</span>"
                 
                 # Show detected alternate names if available
                 p_details = details_map.get(paper_id, {})
@@ -338,13 +361,13 @@ def _create_intersection_heatmap(
     max_val = float(np.nanmax(valid_values)) if len(valid_values) > 0 else 1.0
 
     import plotly.colors as pc
+
     base_colors = pc.get_colorscale(color_scheme)
     if max_val > 0:
-        custom_colorscale = [[0.0, '#FFFFFF'], [0.000001, base_colors[0][1]]] + [[v[0], v[1]] for v in base_colors[1:]]
+        custom_colorscale = [[0.0, "#FFFFFF"], [0.000001, base_colors[0][1]]] + [[v[0], v[1]] for v in base_colors[1:]]
     else:
         custom_colorscale = color_scheme
 
-    # Custom hover text
     hover_text = []
     for i, row_label in enumerate(labels):
         row_texts = []
@@ -356,34 +379,21 @@ def _create_intersection_heatmap(
                 row_texts.append(f"{row_label} ∩ {col_label}: {int(val)} papers")
         hover_text.append(row_texts)
 
-    # Text annotations and font colors are handled via layout annotations
-    # because Plotly's Heatmap textfont.color does NOT support per-cell
-    # 2D color arrays.  Instead, we disable texttemplate on the trace
-    # and add one go.layout.Annotation per cell with individual colors.
-
-    # Build annotations list for per-cell text with dynamic colors (Req #4)
     annotations = []
     for i in range(len(labels)):
         for j in range(len(labels)):
             val = raw_values[i][j]
-            text = ""
-            font_color = COLORS["text_muted"]
             if val in [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE] or np.isnan(val):
-                text = ""
-            else:
-                text = str(int(val))
-                font_color = _get_dynamic_text_color(val, max_val, color_scheme)
-
-            if text:
-                annotations.append(dict(
-                    x=labels[j],
-                    y=labels[i],
-                    text=text,
-                    font=dict(size=9, color=font_color),
-                    showarrow=False,
-                    xref="x",
-                    yref="y",
-                ))
+                continue
+            annotations.append(dict(
+                x=labels[j],
+                y=labels[i],
+                text=str(int(val)),
+                font=dict(size=9, color=_get_dynamic_text_color(val, max_val, color_scheme)),
+                showarrow=False,
+                xref="x",
+                yref="y",
+            ))
 
     fig = go.Figure(data=go.Heatmap(
         z=display_values,
@@ -396,15 +406,14 @@ def _create_intersection_heatmap(
         colorscale=custom_colorscale,
         showscale=True,
         colorbar=dict(title="Count"),
-        hoverongaps=False
-        # No texttemplate — we use layout annotations for per-cell colors
+        hoverongaps=False,
     ))
 
-    size = max(500, len(labels) * 22 + 250)
+    height = max(420, min(1400, len(labels) * 18 + 150))
 
     fig.update_layout(
-        height=size,
-        width=size,
+        height=height,
+        autosize=True,
         font=dict(family="Inter, sans-serif"),
         annotations=annotations,
         xaxis=dict(
@@ -426,9 +435,10 @@ def _create_intersection_heatmap(
             scaleanchor="x",
             scaleratio=1,
         ),
-        margin=dict(l=150, r=50, t=50, b=150),
+        margin=dict(l=140, r=24, t=12, b=96),
         plot_bgcolor=COLORS["surface"],
         paper_bgcolor=COLORS["white"],
+        uirevision="intersection-matrix",
     )
 
     return fig
@@ -476,15 +486,22 @@ def _render_paper_variant_matrix(df: pd.DataFrame):
             hovertemplate="Paper: %{y}<br>Variant: %{x}<br>Present: %{z}<extra></extra>",
         ))
         fig.update_layout(
-            height=max(400, len(display_df) * 16),
+            height=max(360, min(1200, len(display_df) * 18 + 120)),
+            autosize=True,
             font=dict(family="Inter, sans-serif"),
             xaxis=dict(tickangle=45, tickfont=dict(size=8), automargin=True),
             yaxis=dict(tickfont=dict(size=8), autorange="reversed", automargin=True),
-            margin=dict(l=50, r=10, t=10, b=150),
+            margin=dict(l=50, r=10, t=10, b=96),
             plot_bgcolor=COLORS["white"],
             paper_bgcolor=COLORS["white"],
+            uirevision="paper-variant-matrix",
         )
-        st.plotly_chart(fig, use_container_width=True, key="paper_variant_heatmap")
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key="paper_variant_heatmap",
+            config={"responsive": True},
+        )
 
     with col2:
         st.markdown("**Variant Detection Counts**")
@@ -493,11 +510,13 @@ def _render_paper_variant_matrix(df: pd.DataFrame):
             st.progress(pct / 100, text=f"{variant_name}: {int(count)} ({pct:.0f}%)")
 
     # Paper ID mapping
-    id_map = st.session_state.get("paper_id_map", {})
-    if id_map:
+    meta_map = st.session_state.get("paper_meta_map", {})
+    if meta_map:
         with st.expander("Paper ID Reference"):
-            for pid, fname in sorted(id_map.items(), key=lambda x: int(x[0][1:])):
-                st.markdown(f"**{pid}** → {fname}")
+            for pid, meta in sorted(meta_map.items(), key=lambda x: int(x[0][1:])):
+                st.markdown(f"**{pid}** → {meta.get('title', '')}")
+                if meta.get("filename"):
+                    st.caption(f"Filename: {meta['filename']}")
 
     # Expandable raw data table
     with st.expander("View Raw Data Table"):
@@ -539,94 +558,40 @@ def _render_research_gaps(computer: MatrixComputer, dimension_map: dict):
             if a == filter_variant or b == filter_variant
         ]
 
-    st.write(f"Showing {len(filtered_gaps)} gap(s)")
+    if not filtered_gaps:
+        st.success("No gaps match the current filter.")
+        return
 
-    # Display as a dataframe with dimension info
-    gap_rows = []
-    for a, b in filtered_gaps:
-        gap_rows.append({
-            "Dimension A": dimension_map.get(a, "-"),
-            "Variant A": a,
-            "Dimension B": dimension_map.get(b, "-"),
-            "Variant B": b,
-        })
-    gap_df = pd.DataFrame(gap_rows)
-    gap_df.index = range(1, len(gap_df) + 1)
-    gap_df.index.name = "#"
+    gap_df = pd.DataFrame(filtered_gaps, columns=["Variant A", "Variant B"])
+    gap_df["Dimension A"] = gap_df["Variant A"].map(lambda v: dimension_map.get(v, "Uncategorized"))
+    gap_df["Dimension B"] = gap_df["Variant B"].map(lambda v: dimension_map.get(v, "Uncategorized"))
     st.dataframe(gap_df, use_container_width=True, height=400)
 
-    # Download gaps
-    csv = gap_df.to_csv()
     st.download_button(
         "Download Research Gaps CSV",
-        data=csv,
+        data=gap_df.to_csv(index=False),
         file_name="research_gaps.csv",
         mime="text/csv",
     )
 
 
-# ── Detection Overrides (Single + Pair) ───────────────────────────────────
-
-def _render_detection_overrides(df: pd.DataFrame, computer: MatrixComputer):
-    """Render detection overrides: single variants + variant pairs."""
-    st.markdown(sub_header("tune", "Detection Overrides"), unsafe_allow_html=True)
-    st.caption(
-        "Override automatic detection results. Changes apply immediately - "
-        "matrices, drill-downs, and CSV exports update in real time."
-    )
-
-    subtab_single, subtab_pair = st.tabs([
-        "Single Variant Override",
-        "Variant Pair Validation",
-    ])
-
-    with subtab_single:
-        _render_single_override(df, computer)
-
-    with subtab_pair:
-        _render_pair_validation(df, computer)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Manual Validation & Research Fertility
-# ═══════════════════════════════════════════════════════════════════════════
-
-def _render_manual_validation(intersection_df: pd.DataFrame, validator: ConceptualValidator, dimension_map: dict):
-    """Redesigned Manual Validation & Research Fertility system."""
-    st.markdown(sub_header("verified", "Manual Validation & Research Fertility"), unsafe_allow_html=True)
-    st.caption("Rate variant relationships, measure reliability, and identify research opportunities.")
-
-    # 1. Author Configuration
-    st.markdown("### SECTION 1 — Author Configuration")
-    num_authors = st.number_input("Number of Authors (Raters)", min_value=1, max_value=10, value=len(validator.authors), step=1)
-    
-    auth_cols = st.columns(3)
-    new_names = []
-    for i in range(num_authors):
-        current_name = validator.authors[i] if i < len(validator.authors) else f"Author {i+1}"
-        with auth_cols[i % 3]:
-            name = st.text_input(f"Author {i+1} Name", value=current_name, key=f"auth_name_{i}")
-            new_names.append(name)
-            
-    if new_names != validator.authors:
-        if st.button("Update Author Configuration"):
-            validator.update_config(new_names)
-            st.success("Configuration updated!")
-            st.rerun()
-
-    st.divider()
-
-    # 2. Rating Table / CSV Upload
+def _render_manual_validation(
+    intersection_df: pd.DataFrame,
+    validator: ConceptualValidator,
+    computer: MatrixComputer,
+    dimension_map: dict,
+):
+    """Render the manual validation / fertility section."""
     st.markdown("### SECTION 2 — Rating Table / CSV Upload")
-    
+
     sub_up, sub_table = st.tabs(["CSV Upload", "Interactive Table"])
-    
+
     pairs = validator.get_all_pairs()
-    
+
     with sub_table:
         st.markdown("#### Rate Variant Combinations")
         st.caption("R = Relevant, N = Not relevant, ? = Uncertain")
-        
+
         data = []
         for v1, v2 in pairs:
             row = {"Variant A": v1, "Variant B": v2}
@@ -634,10 +599,10 @@ def _render_manual_validation(intersection_df: pd.DataFrame, validator: Conceptu
             for a in validator.authors:
                 row[a] = r_dict.get(a, "?")
             data.append(row)
-        
+
         df_editor = pd.DataFrame(data)
         col_config = {a: st.column_config.SelectboxColumn(a, options=["R", "N", "?"], required=True) for a in validator.authors}
-        
+
         edited_df = st.data_editor(
             df_editor,
             column_config=col_config,
@@ -646,13 +611,13 @@ def _render_manual_validation(intersection_df: pd.DataFrame, validator: Conceptu
             use_container_width=True,
             key="fertility_editor_multi"
         )
-        
+
         c1, c2 = st.columns(2)
         if c1.button("Save Manual Ratings", type="primary"):
             validator.bulk_update(edited_df)
             st.success("Ratings saved!")
             st.rerun()
-            
+
         csv_template = edited_df.to_csv(index=False)
         c2.download_button("Download Rating Template CSV", data=csv_template, file_name="rating_template.csv", mime="text/csv")
 
@@ -672,77 +637,85 @@ def _render_manual_validation(intersection_df: pd.DataFrame, validator: Conceptu
 
     st.divider()
 
-    # 3. Inter-Rater Reliability
     st.markdown("### SECTION 3 — Inter-Rater Reliability")
     alpha = validator.compute_reliability()
-    
+
     c1, _ = st.columns([1, 2])
     c1.metric("Krippendorff Alpha", alpha)
-    
+
     if alpha > 0.8:
         st.success("**Excellent agreement** (Alpha > 0.8)")
     elif alpha >= 0.7:
         st.info("**Acceptable agreement** (Alpha 0.7 - 0.8)")
     else:
         st.warning("**Low agreement** (Alpha < 0.7)")
-    
+
     st.caption("Alpha measures the agreement between raters considering chance. 1.0 is perfect, 0.0 is chance.")
 
     st.divider()
 
-    # 4. Opportunity Matrix
     st.markdown("### SECTION 4 — Opportunity Matrix")
     st.caption("Showing pairs marked 'Relevant' (majority) but with 0 existing papers.")
-    
-    # Compute Final Ratings and Opportunities
+
     results = []
     opportunity_pairs = []
-    
-    # Optimization: pre-calculate everything for CSV summary later
+
     for v1, v2 in pairs:
         final = validator.get_majority_rating(v1, v2)
-        count = intersection_df.loc[v1, v2]
+        count = computer.get_pair_intersection_count(v1, v2)
         is_opp = (final == "R" and count == 0)
         results.append({
-            "Variant A": v1, "Variant B": v2, "Final Rating": final, 
-            "Paper Count": count, "Is Opportunity": is_opp
+            "Variant A": v1,
+            "Variant B": v2,
+            "Final Rating": final,
+            "Paper Count": count,
+            "Is Opportunity": is_opp,
         })
-        if is_opp: opportunity_pairs.append((v1, v2))
-            
+        if is_opp:
+            opportunity_pairs.append((v1, v2))
+
     res_df = pd.DataFrame(results)
-    
-    # Create the Opportunity Matrix (Lower Triangle)
+
     opp_matrix = intersection_df.copy()
     for i, r_label in enumerate(intersection_df.index):
         for j, c_label in enumerate(intersection_df.columns):
-            if j >= i: continue # Mask upper + diag
-            
+            if j >= i:
+                continue
+
             final_rating = validator.get_majority_rating(r_label, c_label)
-            count = intersection_df.iloc[i, j]
+            count = computer.get_pair_intersection_count(r_label, c_label)
             if final_rating == "R" and count == 0:
-                opp_matrix.iloc[i, j] = 0.0 # It's an opportunity
+                opp_matrix.iloc[i, j] = 0.0
             else:
-                opp_matrix.iloc[i, j] = np.nan # Blank/Masked
+                opp_matrix.iloc[i, j] = np.nan
 
     color_scheme = st.session_state.get("heatmap_color_scheme", "Blues")
     fig = _create_intersection_heatmap(opp_matrix, dimension_map, color_scheme)
-    st.plotly_chart(fig, use_container_width=True, key="opportunity_heatmap")
-    
-    st.download_button("Download Opportunity Matrix CSV", data=opp_matrix.to_csv(), file_name="opportunity_matrix.csv")
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        key="opportunity_heatmap",
+        config={"responsive": True},
+    )
+
+    st.download_button(
+        "Download Opportunity Matrix CSV",
+        data=opp_matrix.to_csv(),
+        file_name="opportunity_matrix.csv",
+    )
 
     st.divider()
 
-    # 5. Fertility Ratio
     st.markdown("### SECTION 5 — Research Fertility Ratio")
     total_possible = len(pairs)
     opp_count = len(opportunity_pairs)
     ratio = opp_count / total_possible if total_possible > 0 else 0
-    
+
     f1, f2, f3 = st.columns(3)
     f1.metric("Total Possible Pairs", total_possible)
     f2.metric("Research Opportunities", opp_count)
     f3.metric("Fertility Ratio", f"{ratio:.3f}")
-    
+
     if ratio > 0.5:
         st.success("Large unexplored research space (Ratio > 0.5)")
     elif ratio > 0.2:
@@ -750,30 +723,48 @@ def _render_manual_validation(intersection_df: pd.DataFrame, validator: Conceptu
     else:
         st.warning("Research area getting saturated (Ratio < 0.2)")
 
-    # Export All
     st.markdown("#### Export Fertility Analysis")
     sum_data = {
         "Metric": ["Krippendorff Alpha", "Total Pairs", "Opportunity Count", "Fertility Ratio"],
-        "Value": [alpha, total_possible, opp_count, ratio]
+        "Value": [alpha, total_possible, opp_count, ratio],
     }
     sum_csv = pd.DataFrame(sum_data).to_csv(index=False)
-    
+
     col_dl1, col_dl2 = st.columns(2)
     col_dl1.download_button("Download Ratings Summary Table", data=res_df.to_csv(index=False), file_name="fertility_ratings_summary.csv")
     col_dl2.download_button("Download Fertility Analysis Summary (Stats)", data=sum_csv, file_name="fertility_analysis_summary.csv")
+
+
+def _render_detection_overrides(df: pd.DataFrame, computer: MatrixComputer):
+    """Render the detection override tab.
+
+    This preserves the original tab entry point used by render_matrix_viewer()
+    while delegating to the existing single-override and pair-validation
+    sections.
+    """
+    st.markdown(sub_header("edit", "Detection Overrides"), unsafe_allow_html=True)
+    st.caption("Adjust individual detections or confirm variant pairs.")
+    _render_single_override(df, computer)
+    st.divider()
+    _render_pair_validation(df, computer)
 
 
 def _render_single_override(df: pd.DataFrame, computer: MatrixComputer):
     """Allow manual override of individual variant detection results."""
     paper_ids = list(df.index)
     variant_names = list(df.columns)
-    id_map = st.session_state.get("paper_id_map", {})
+    meta_map = st.session_state.get("paper_meta_map", {})
 
     col1, col2 = st.columns(2)
     with col1:
-        selected_paper = st.selectbox("Select Paper", paper_ids, key="val_paper")
-        if selected_paper and selected_paper in id_map:
-            st.caption(f"File: {id_map[selected_paper]}")
+        selected_paper = st.selectbox(
+            "Select Paper",
+            paper_ids,
+            key="val_paper",
+            format_func=_paper_option_label,
+        )
+        if selected_paper and selected_paper in meta_map:
+            st.caption(f"Filename: {meta_map[selected_paper].get('filename', '')}")
     with col2:
         selected_variant = st.selectbox("Select Variant", variant_names, key="val_variant")
 
@@ -813,6 +804,7 @@ def _render_single_override(df: pd.DataFrame, computer: MatrixComputer):
             for var_name, val in vars_dict.items():
                 override_rows.append({
                     "Paper": pid,
+                    "Title": _get_paper_meta(pid).get("title", ""),
                     "Variant": var_name,
                     "Override Value": "Present" if val else "Absent",
                 })
@@ -835,15 +827,20 @@ def _render_pair_validation(df: pd.DataFrame, computer: MatrixComputer):
     """Allow manual validation of variant pairs (combinations)."""
     paper_ids = list(df.index)
     variant_names = list(df.columns)
-    id_map = st.session_state.get("paper_id_map", {})
+    meta_map = st.session_state.get("paper_meta_map", {})
     dimension_map = st.session_state.get("dimension_map", {})
 
     st.markdown("#### Validate a Variant Pair")
     col1, col2, col3 = st.columns(3)
     with col1:
-        pair_paper = st.selectbox("Select Paper", paper_ids, key="pair_val_paper")
-        if pair_paper and pair_paper in id_map:
-            st.caption(f"File: {id_map[pair_paper]}")
+        pair_paper = st.selectbox(
+            "Select Paper",
+            paper_ids,
+            key="pair_val_paper",
+            format_func=_paper_option_label,
+        )
+        if pair_paper and pair_paper in meta_map:
+            st.caption(f"Filename: {meta_map[pair_paper].get('filename', '')}")
     with col2:
         pair_va = st.selectbox("Variant A", variant_names, key="pair_val_va")
         if pair_va: st.caption(f"Dimension: {dimension_map.get(pair_va, '-')}")
@@ -875,6 +872,7 @@ def _render_pair_validation(df: pd.DataFrame, computer: MatrixComputer):
             for pair in pairs:
                 pair_rows.append({
                     "Paper": pid,
+                    "Title": _get_paper_meta(pid).get("title", ""),
                     "Variant A": pair[0],
                     "Variant B": pair[1],
                 })
@@ -937,7 +935,15 @@ def _render_download_results():
             )
 
     # Paper ID reference
-    if "paper_id_map" in st.session_state:
+    if "paper_meta_map" in st.session_state:
+        st.divider()
+        with st.expander("Paper ID Reference (P-ID -> Title)"):
+            meta_map = st.session_state.paper_meta_map
+            for pid, meta in sorted(meta_map.items(), key=lambda x: int(x[0][1:])):
+                st.markdown(f"**{pid}** -> {meta.get('title', '')}")
+                if meta.get("filename"):
+                    st.caption(f"Filename: {meta['filename']}")
+    elif "paper_id_map" in st.session_state:
         st.divider()
         with st.expander("Paper ID Reference (P-ID -> Filename)"):
             id_map = st.session_state.paper_id_map

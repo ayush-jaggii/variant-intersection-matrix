@@ -18,6 +18,8 @@ Usage:
     icon("science")                         # Returns inline icon HTML
 """
 
+from typing import Optional
+
 # ─── Color Palette ───────────────────────────────────────────────────────────
 # Design tokens used across the theme CSS and Plotly charts.
 
@@ -39,7 +41,7 @@ COLORS = {
 
 # ─── Icon helper ─────────────────────────────────────────────────────────────
 
-def icon(name: str, size: int = 20, color: str | None = None) -> str:
+def icon(name: str, size: int = 20, color: Optional[str] = None) -> str:
     """
     Return an inline HTML span rendering a Material Symbols Rounded icon.
 

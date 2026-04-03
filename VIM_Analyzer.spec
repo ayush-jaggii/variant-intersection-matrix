@@ -4,7 +4,7 @@ from PyInstaller.utils.hooks import copy_metadata
 
 datas = [('data', 'data'), ('interface', 'interface'), ('core', 'core'), ('config', 'config'), ('utils', 'utils')]
 binaries = []
-hiddenimports = ['streamlit', 'pandas', 'numpy', 'pymupdf', 'fitz', 'pdfplumber', 'streamlit.runtime.scriptrunner.magic_funcs', 'seaborn', 'matplotlib']
+hiddenimports = ['streamlit', 'pandas', 'numpy', 'pymupdf', 'fitz', 'streamlit.runtime.scriptrunner.magic_funcs', 'seaborn', 'matplotlib']
 datas += copy_metadata('streamlit')
 tmp_ret = collect_all('streamlit')
 datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]

@@ -65,7 +65,9 @@ def run_pyinstaller():
         f.write(version_info_content)
 
     command = [
-        "pyinstaller",
+      sys.executable,
+      "-m",
+      "PyInstaller",
         "--onefile",
         "--noconsole",
 
@@ -74,7 +76,6 @@ def run_pyinstaller():
         "--hidden-import", "numpy",
         "--hidden-import", "pymupdf",
         "--hidden-import", "fitz",
-        "--hidden-import", "pdfplumber",
         "--hidden-import", "streamlit.runtime.scriptrunner.magic_funcs",
         "--hidden-import", "seaborn",
         "--hidden-import", "matplotlib",

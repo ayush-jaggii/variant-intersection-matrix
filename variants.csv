@@ -1,0 +1,227 @@
+dimension,variant,alternate_name
+Product Energy Consumption,Energy Consuming,energy consuming
+Product Energy Consumption,Energy Consuming,energy intensive
+Product Energy Consumption,Energy Consuming,power consuming
+Product Energy Consumption,Energy Consuming,electric powered
+Product Energy Consumption,Energy Consuming,fuel powered
+Product Energy Consumption,Energy Consuming,energy dependent
+Product Energy Consumption,Energy Consuming,high energy consumption
+Product Energy Consumption,Energy Consuming,energy usage
+Product Energy Consumption,Non Energy Consuming,non energy consuming
+Product Energy Consumption,Non Energy Consuming,manual product
+Product Energy Consumption,Non Energy Consuming,non powered
+Product Energy Consumption,Non Energy Consuming,passive product
+Product Energy Consumption,Non Energy Consuming,low energy consumption
+Product Energy Consumption,Non Energy Consuming,no energy requirement
+Product Requirement,One-off,one off
+Product Requirement,One-off,single use
+Product Requirement,One-off,one time use
+Product Requirement,One-off,disposable product
+Product Requirement,One-off,one-time usage
+Product Requirement,Temporary,temporary
+Product Requirement,Temporary,short term
+Product Requirement,Temporary,temporary use
+Product Requirement,Temporary,short-term use
+Product Requirement,Temporary,limited duration
+Product Requirement,Temporary,temporary product
+Product Requirement,Intermittent,intermittent
+Product Requirement,Intermittent,occasional use
+Product Requirement,Intermittent,periodic use
+Product Requirement,Intermittent,irregular usage
+Product Requirement,Intermittent,sporadic usage
+Product Requirement,Seasonal,seasonal
+Product Requirement,Seasonal,seasonal use
+Product Requirement,Seasonal,seasonal product
+Product Requirement,Seasonal,periodic seasonal demand
+Product Requirement,Permanent,permanent
+Product Requirement,Permanent,long term
+Product Requirement,Permanent,long-term use
+Product Requirement,Permanent,continuous use
+Product Requirement,Permanent,permanent usage
+Nature of Product Use,As End Product,end product
+Nature of Product Use,As End Product,final product
+Nature of Product Use,As End Product,consumer product
+Nature of Product Use,As End Product,finished product
+Nature of Product Use,As End Product,final use product
+Nature of Product Use,As Intermediate Resource,intermediate resource
+Nature of Product Use,As Intermediate Resource,intermediate product
+Nature of Product Use,As Intermediate Resource,input resource
+Nature of Product Use,As Intermediate Resource,production input
+Nature of Product Use,As Intermediate Resource,industrial input
+Product End-of-Life Disposal,Landfill,landfill
+Product End-of-Life Disposal,Landfill,landfill disposal
+Product End-of-Life Disposal,Landfill,waste landfill
+Product End-of-Life Disposal,Landfill,disposed in landfill
+Product End-of-Life Disposal,Incineration,incineration
+Product End-of-Life Disposal,Incineration,burning waste
+Product End-of-Life Disposal,Incineration,waste combustion
+Product End-of-Life Disposal,Incineration,thermal disposal
+Product End-of-Life Disposal,Recycling,recycling
+Product End-of-Life Disposal,Recycling,recycled material
+Product End-of-Life Disposal,Recycling,recycle process
+Product End-of-Life Disposal,Recycling,material recovery
+Product End-of-Life Disposal,Recycling,reprocessing
+Product End-of-Life Disposal,Retrieving,retrieving
+Product End-of-Life Disposal,Retrieving,product retrieval
+Product End-of-Life Disposal,Retrieving,take back
+Product End-of-Life Disposal,Retrieving,product take-back
+Product End-of-Life Disposal,Retrieving,resource recovery
+Product End-of-Life Disposal,Retrieving,product return
+Product Technological Maturity,Immature Product,immature product
+Product Technological Maturity,Immature Product,early stage technology
+Product Technological Maturity,Immature Product,nascent technology
+Product Technological Maturity,Immature Product,emerging technology
+Product Technological Maturity,Immature Product,prototype technology
+Product Technological Maturity,Mature Product,mature product
+Product Technological Maturity,Mature Product,established technology
+Product Technological Maturity,Mature Product,developed technology
+Product Technological Maturity,Mature Product,commercialized product
+Product Technological Maturity,Mature Product,stable technology
+PSS Aggregation Strategy,No Aggregation,no aggregation
+PSS Aggregation Strategy,No Aggregation,individual product use
+PSS Aggregation Strategy,No Aggregation,single unit use
+PSS Aggregation Strategy,No Aggregation,independent usage
+PSS Aggregation Strategy,Spatial Aggregation,spatial aggregation
+PSS Aggregation Strategy,Spatial Aggregation,shared location use
+PSS Aggregation Strategy,Spatial Aggregation,co located usage
+PSS Aggregation Strategy,Spatial Aggregation,clustered product use
+PSS Aggregation Strategy,Temporal Aggregation,temporal aggregation
+PSS Aggregation Strategy,Temporal Aggregation,time based sharing
+PSS Aggregation Strategy,Temporal Aggregation,time scheduling
+PSS Aggregation Strategy,Temporal Aggregation,time sharing model
+PSS Fulfillment Strategy,Immediate Fulfillment,immediate fulfillment
+PSS Fulfillment Strategy,Immediate Fulfillment,instant service
+PSS Fulfillment Strategy,Immediate Fulfillment,real time fulfillment
+PSS Fulfillment Strategy,Immediate Fulfillment,instant availability
+PSS Fulfillment Strategy,Delayed Fulfillment,delayed fulfillment
+PSS Fulfillment Strategy,Delayed Fulfillment,scheduled delivery
+PSS Fulfillment Strategy,Delayed Fulfillment,delayed service
+PSS Fulfillment Strategy,Delayed Fulfillment,future delivery
+PSS Fulfillment Strategy,Time Bound Fulfillment,time bound fulfillment
+PSS Fulfillment Strategy,Time Bound Fulfillment,time limited service
+PSS Fulfillment Strategy,Time Bound Fulfillment,time restricted delivery
+PSS Fulfillment Strategy,Time Bound Fulfillment,time window fulfillment
+PSS Channels,Fully Servitised Manufacturer,servitized manufacturer
+PSS Channels,Fully Servitised Manufacturer,product service provider
+PSS Channels,Fully Servitised Manufacturer,manufacturer service model
+PSS Channels,Fully Servitised Manufacturer,integrated manufacturer service
+PSS Channels,Integrated PSS Channel,integrated pss channel
+PSS Channels,Integrated PSS Channel,integrated service channel
+PSS Channels,Integrated PSS Channel,combined distribution channel
+PSS Channels,Integrated PSS Channel,hybrid service channel
+PSS Channels,Independent PSS Channel,independent pss channel
+PSS Channels,Independent PSS Channel,third party service provider
+PSS Channels,Independent PSS Channel,independent service provider
+PSS Channels,Independent PSS Channel,external service platform
+PSS Models,Product Pooling,product pooling
+PSS Models,Product Pooling,shared product pool
+PSS Models,Product Pooling,product sharing pool
+PSS Models,Product Pooling,pooling model
+PSS Models,Product Leasing,product leasing
+PSS Models,Product Leasing,leasing model
+PSS Models,Product Leasing,equipment leasing
+PSS Models,Product Leasing,lease service
+PSS Models,Product Renting,product renting
+PSS Models,Product Renting,rental model
+PSS Models,Product Renting,renting service
+PSS Models,Product Renting,rent instead of buy
+PSS Models,Pay-Per-Use Service,pay per use
+PSS Models,Pay-Per-Use Service,usage based payment
+PSS Models,Pay-Per-Use Service,pay as you use
+PSS Models,Pay-Per-Use Service,metered usage service
+PSS Models,Functional Results,functional results
+PSS Models,Functional Results,performance based service
+PSS Models,Functional Results,outcome based service
+PSS Models,Functional Results,result oriented service
+PSS Platform,Non-Platform,non platform
+PSS Platform,Non-Platform,offline service model
+PSS Platform,Non-Platform,non digital platform
+PSS Platform,Non-Platform,traditional service channel
+PSS Platform,Scheduled Based,scheduled based
+PSS Platform,Scheduled Based,scheduled platform
+PSS Platform,Scheduled Based,appointment based service
+PSS Platform,Scheduled Based,reservation platform
+PSS Platform,On-Demand,on demand
+PSS Platform,On-Demand,instant access platform
+PSS Platform,On-Demand,real time service platform
+PSS Platform,On-Demand,on demand service
+PSS Platform,Supply Constrained,supply constrained
+PSS Platform,Supply Constrained,limited supply platform
+PSS Platform,Supply Constrained,capacity constrained service
+PSS Platform,Supply Constrained,restricted availability
+PSS Platform,Tethered Digital,tethered digital
+PSS Platform,Tethered Digital,connected digital platform
+PSS Platform,Tethered Digital,iot enabled platform
+PSS Platform,Tethered Digital,digitally tethered service
+Capital Intensity of PSS,Asset Light,asset light
+Capital Intensity of PSS,Asset Light,low capital intensity
+Capital Intensity of PSS,Asset Light,low asset investment
+Capital Intensity of PSS,Asset Light,minimal asset ownership
+Capital Intensity of PSS,Asset Heavy,asset heavy
+Capital Intensity of PSS,Asset Heavy,high capital intensity
+Capital Intensity of PSS,Asset Heavy,asset intensive
+Capital Intensity of PSS,Asset Heavy,capital intensive infrastructure
+Functional Environmental Outcomes,Efficiency Improvement,efficiency improvement
+Functional Environmental Outcomes,Efficiency Improvement,resource efficiency
+Functional Environmental Outcomes,Efficiency Improvement,operational efficiency
+Functional Environmental Outcomes,Efficiency Improvement,energy efficiency improvement
+Functional Environmental Outcomes,Utility Improvement,utility improvement
+Functional Environmental Outcomes,Utility Improvement,improved functionality
+Functional Environmental Outcomes,Utility Improvement,enhanced usability
+Functional Environmental Outcomes,Utility Improvement,better product utility
+Functional Environmental Outcomes,Obsolescence Reduction,obsolescence reduction
+Functional Environmental Outcomes,Obsolescence Reduction,reduced obsolescence
+Functional Environmental Outcomes,Obsolescence Reduction,extended product life
+Functional Environmental Outcomes,Obsolescence Reduction,lifecycle extension
+Functional Environmental Outcomes,Consumption Reduction,consumption reduction
+Functional Environmental Outcomes,Consumption Reduction,reduced resource consumption
+Functional Environmental Outcomes,Consumption Reduction,lower material use
+Functional Environmental Outcomes,Consumption Reduction,reduced usage
+Functional Environmental Outcomes,Affordability Enhancement,affordability enhancement
+Functional Environmental Outcomes,Affordability Enhancement,improved affordability
+Functional Environmental Outcomes,Affordability Enhancement,cost accessibility
+Functional Environmental Outcomes,Affordability Enhancement,economic accessibility
+Functional Environmental Outcomes,Waste Utilisation,waste utilisation
+Functional Environmental Outcomes,Waste Utilisation,waste recovery
+Functional Environmental Outcomes,Waste Utilisation,waste valorisation
+Functional Environmental Outcomes,Waste Utilisation,waste reuse
+Political Consumerism,Non-Political (Pro Market),pro market
+Political Consumerism,Non-Political (Pro Market),market oriented consumption
+Political Consumerism,Non-Political (Pro Market),non political consumption
+Political Consumerism,Non-Political (Pro Market),consumer driven market
+Political Consumerism,Political (Anti-Market),anti market
+Political Consumerism,Political (Anti-Market),political consumerism
+Political Consumerism,Political (Anti-Market),ethical consumer activism
+Political Consumerism,Political (Anti-Market),consumer protest behaviour
+Product Access Value,Hedonic,hedonic value
+Product Access Value,Hedonic,pleasure oriented use
+Product Access Value,Hedonic,experiential value
+Product Access Value,Hedonic,enjoyment driven consumption
+Product Access Value,Utilitarian,utilitarian value
+Product Access Value,Utilitarian,functional value
+Product Access Value,Utilitarian,practical utility
+Product Access Value,Utilitarian,functional consumption
+Product Ownership,Manufacturers,manufacturer
+Product Ownership,Manufacturers,manufacturers
+Product Ownership,Manufacturers,producer
+Product Ownership,Manufacturers,producers
+Product Ownership,Manufacturers,oem
+Product Ownership,Manufacturers,original equipment manufacturer
+Product Ownership,Platform/ Service Providers,platform provider
+Product Ownership,Platform/ Service Providers,service provider
+Product Ownership,Platform/ Service Providers,platform operator
+Product Ownership,Platform/ Service Providers,service operator
+Product Ownership,Platform/ Service Providers,digital platform
+Product Ownership,Partners,partner
+Product Ownership,Partners,partners
+Product Ownership,Partners,business partner
+Product Ownership,Partners,strategic partner
+Product Ownership,Partners,partner organization
+Product Ownership,Consortia,consortium
+Product Ownership,Consortia,consortia
+Product Ownership,Consortia,industry consortium
+Product Ownership,Consortia,industry alliance
+Product Ownership,Individuals,individual
+Product Ownership,Individuals,individual user
+Product Ownership,Individuals,private owner
+Product Ownership,Individuals,end user ownership

@@ -1,5 +1,52 @@
-# Core Dependencies
+# Runtime dependencies (required)
+streamlit>=1.45,<1.51
+plotly>=5.20,<7
+pandas>=2.0,<2.4
+numpy>=1.24,<2.1; python_version < "3.13"
+numpy>=2.1,<3; python_version >= "3.13"
+matplotlib>=3.7,<3.10
+seaborn>=0.13,<0.14
+PyMuPDF>=1.23,<1.27
+pdfplumber>=0.11,<1
+openpyxl>=3.1,<4
+requests>=2.31,<3
+
+# Development dependencies
+pytest>=8,<10
+pytest-timeout>=2,<3
+GitPython>=3.1,<4
+
+# Build dependencies
+pyinstaller>=6.0,<7
+pyinstaller-hooks-contrib>=2024.0
+
+# Pinned versions for reproducible builds
 streamlit==1.55.0
+pandas==2.3.3
+plotly==6.6.0
+matplotlib==3.10.8
+seaborn==0.13.2
+# Runtime dependencies (required)# Core Dependencies
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+GitPython>=3.1,<4pytest-timeout>=2,<3pytest>=8,<10# Development dependencies (optional)pyinstaller-hooks-contrib>=2024.0pyinstaller>=6.0,<7# Build dependencies (optional, for executable packaging)requests>=2.31,<3openpyxl>=3.1,<4PyMuPDF>=1.23,<1.27seaborn>=0.13,<0.14matplotlib>=3.7,<3.10plotly>=5.20,<7numpy>=1.24,<2.1pandas>=2.0,<2.4streamlit>=1.45,<1.51streamlit==1.55.0
 pandas==2.3.3
 numpy==2.4.2
 plotly==6.6.0
@@ -12,8 +59,6 @@ openpyxl==3.1.5
 # Packaging
 pyinstaller==6.19.0
 pyinstaller-hooks-contrib==2026.2
-
-# Performance & Utilities
 requests==2.32.5
 urllib3==2.6.3
 charset-normalizer==3.4.5

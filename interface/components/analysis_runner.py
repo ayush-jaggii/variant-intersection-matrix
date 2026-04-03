@@ -42,13 +42,13 @@ from pathlib import Path
 
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
-from config.settings import PAPERS_DIR
+from config.settings import PAPERS_DIR, CACHE_DIR
 from core.pipeline import process_single_paper
 from core.text_extraction import TextExtractor
 from core.preprocessing import TextPreprocessor
 from core.variant_detection import VariantDetector
 from core.matrix_computation import MatrixComputer
-from utils.helpers import list_paper_files
+from utils.helpers import list_paper_files, load_json
 from interface.design import section_header, sub_header, icon
 
 logger = logging.getLogger(__name__)
@@ -74,6 +74,24 @@ _RESULT = {
     "sub_total": 0,       # sub-step progress: total items (e.g., 56 papers)
 }
 
+TITLE_OVERRIDES_FILE = CACHE_DIR / "paper_title_overrides.json"
+
+
+def _get_title_overrides_for_analysis() -> dict:
+    """Get title overrides from session state, with disk fallback."""
+    overrides = st.session_state.get("paper_title_overrides")
+    if isinstance(overrides, dict):
+        return overrides
+
+    try:
+        data = load_json(TITLE_OVERRIDES_FILE)
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+
+    return {}
+
 
 def _is_analysis_running() -> bool:
     """Check if a background analysis is currently running."""
@@ -98,6 +116,7 @@ def _check_and_load_results():
         st.session_state.variant_detector = data["detector"]
         st.session_state.dimension_map = data["dimension_map"]
         st.session_state.paper_id_map = data["id_to_filename"]
+        st.session_state.paper_meta_map = data.get("id_to_paper_meta", {})
         st.session_state.analysis_complete = True
         st.session_state.analysis_running = False
 
@@ -154,7 +173,10 @@ def render_analysis_runner():
     )
 
     if run_clicked:
-        _run_analysis_with_live_progress(list(variants))
+        _run_analysis_with_live_progress(
+            list(variants),
+            _get_title_overrides_for_analysis(),
+        )
 
     # ── In-progress indicator (when user returns to this page mid-run) ──
     if is_running and not run_clicked:
@@ -170,7 +192,7 @@ def render_analysis_runner():
         _show_results_summary()
 
 
-def _run_analysis_with_live_progress(variants: list):
+def _run_analysis_with_live_progress(variants: list, title_overrides: dict):
     """
     Start the background thread and show live progress via st.status().
 
@@ -190,7 +212,7 @@ def _run_analysis_with_live_progress(variants: list):
 
     thread = threading.Thread(
         target=_run_pipeline_in_thread,
-        args=(variants,),
+        args=(variants, title_overrides),
         daemon=True,
     )
     thread.start()
@@ -292,7 +314,7 @@ def _show_polling_progress():
     st.rerun()
 
 
-def _run_pipeline_in_thread(variants: list):
+def _run_pipeline_in_thread(variants: list, title_overrides: dict):
     """
     Execute the full analysis pipeline in a background daemon thread.
 
@@ -311,6 +333,7 @@ def _run_pipeline_in_thread(variants: list):
         extractor = TextExtractor()
         paper_items = list(extractor.paper_id_map.items())
         total_papers = len(paper_items)
+        id_to_paper_meta = extractor.get_id_to_paper_meta_map(title_overrides)
         id_to_filename = extractor.get_id_to_filename_map()
 
         if total_papers == 0:
@@ -365,6 +388,7 @@ def _run_pipeline_in_thread(variants: list):
         dimension_map = detector.get_dimension_map()
 
         computer = MatrixComputer()
+        computer.set_paper_metadata(id_to_paper_meta)
         paper_variant_df = computer.build_paper_variant_matrix(
             detection_results, variant_names, detection_details
         )
@@ -387,6 +411,7 @@ def _run_pipeline_in_thread(variants: list):
             "detector": detector,
             "dimension_map": dimension_map,
             "id_to_filename": id_to_filename,
+            "id_to_paper_meta": id_to_paper_meta,
         }
         _RESULT["status"] = "complete"
         logger.info("Background analysis completed")
@@ -417,7 +442,15 @@ def _show_results_summary():
     col8.metric("Excluded Pairs", stats.get("excluded_pairs", 0))
 
     # Paper ID mapping
-    if "paper_id_map" in st.session_state:
+    if "paper_meta_map" in st.session_state:
+        with st.expander("Paper ID Reference (P-ID -> Title)"):
+            meta_map = st.session_state.paper_meta_map
+            for pid, meta in sorted(meta_map.items(), key=lambda x: int(x[0][1:])):
+                title = meta.get("title", "")
+                filename = meta.get("filename", "")
+                st.markdown(f"**{pid}** -> {title}  ")
+                st.caption(f"Filename: {filename}")
+    elif "paper_id_map" in st.session_state:
         with st.expander("Paper ID Reference (P-ID -> Filename)"):
             id_map = st.session_state.paper_id_map
             for pid, fname in sorted(id_map.items(), key=lambda x: int(x[0][1:])):

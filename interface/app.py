@@ -11,6 +11,9 @@ the sidebar radio buttons.  No rigid ordering is enforced.
 
 import sys
 import logging
+import tempfile
+import threading
+import time
 from pathlib import Path
 
 import streamlit as st
@@ -35,6 +38,53 @@ from interface.components.analysis_runner import (
 )
 from interface.components.matrix_viewer import render_matrix_viewer
 
+
+_WATCHDOG_STARTED = False
+
+
+def _activity_file_path() -> Path:
+    """Return a stable file path for heartbeat tracking."""
+    try:
+        if getattr(sys, "frozen", False):
+            return Path(sys.executable).resolve().parent / "activity.tmp"
+    except Exception:
+        pass
+
+    # Development fallback: use OS temp dir to avoid permission issues.
+    return Path(tempfile.gettempdir()) / "vim_analyzer_activity.tmp"
+
+
+def _update_activity_heartbeat() -> None:
+    """Write latest UI activity timestamp; safe on every rerun."""
+    try:
+        _activity_file_path().write_text(str(time.time()), encoding="utf-8")
+    except Exception:
+        # Heartbeat failure must never break the app.
+        pass
+
+
+def _monitor_activity() -> None:
+    """Background heartbeat monitor kept for compatibility.
+
+    The previous implementation force-exited the process after an idle
+    timeout, which made the app disappear unexpectedly.  The monitor now
+    only tracks activity and never terminates the server process.
+    """
+    while True:
+        time.sleep(30)
+        _update_activity_heartbeat()
+
+
+def _ensure_watchdog_started() -> None:
+    """Start inactivity watchdog exactly once per process."""
+    global _WATCHDOG_STARTED
+    if _WATCHDOG_STARTED:
+        return
+
+    t = threading.Thread(target=_monitor_activity, daemon=True)
+    t.start()
+    _WATCHDOG_STARTED = True
+
 # ── Logging Setup ────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -55,6 +105,10 @@ st.set_page_config(
 
 # ── Inject Design System ─────────────────────────────────────────────────
 st.markdown(get_theme_css(), unsafe_allow_html=True)
+
+# ── Activity Heartbeat + Watchdog (noconsole-safe termination) ──────────
+_update_activity_heartbeat()
+_ensure_watchdog_started()
 
 # ── Check for background analysis results on every rerun ─────────────────
 # This ensures results are picked up even when the user is on another tab.
@@ -139,6 +193,10 @@ with st.sidebar:
     st.divider()
     st.caption("Variant Intersection Matrix Analyzer")
     st.caption("Academic Research Tool")
+    st.caption("Close this tab to stop viewing the app. The server stays running in the background.")
+
+    if st.button("🛑 Exit Application", type="secondary", use_container_width=True):
+        st.info("The app is running as a background server. Stop the terminal process to fully shut it down.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════
