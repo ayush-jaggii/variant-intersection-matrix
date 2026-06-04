@@ -196,7 +196,11 @@ with st.sidebar:
     st.caption("Close this tab to stop viewing the app. The server stays running in the background.")
 
     if st.button("🛑 Exit Application", type="secondary", use_container_width=True):
-        st.info("The app is running as a background server. Stop the terminal process to fully shut it down.")
+        st.warning("Shutdown initiated. You can now close this tab.")
+        import os
+        import time
+        time.sleep(1)
+        os._exit(0)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

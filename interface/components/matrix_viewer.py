@@ -47,6 +47,9 @@ from typing import List, Optional, Tuple
 
 from config.settings import HEATMAP_COLORSCALE, HEATMAP_ZERO_COLOR, OUTPUT_DIR
 from core.matrix_computation import MatrixComputer, EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE
+import importlib
+import core.conceptual_validation
+importlib.reload(core.conceptual_validation)
 from core.conceptual_validation import ConceptualValidator
 from interface.design import section_header, sub_header, icon, COLORS
 
@@ -81,8 +84,12 @@ def render_matrix_viewer():
     dimension_map = st.session_state.get("dimension_map", {})
 
     if "conceptual_validator" not in st.session_state:
-        st.session_state.conceptual_validator = ConceptualValidator(list(intersection_df.columns))
+        st.session_state.conceptual_validator = ConceptualValidator(
+            list(intersection_df.columns),
+            dimension_map=dimension_map
+        )
     validator = st.session_state.conceptual_validator
+    validator.dimension_map = dimension_map
 
     # ── Tabs ─────────────────────────────────────────────────────────
     tab_intersection, tab_paper_variant, tab_gaps, tab_overrides, tab_validation, tab_download = st.tabs([
@@ -209,7 +216,7 @@ def _render_intersection_matrix(
     fig = _create_intersection_heatmap(display_df, dimension_map, color_scheme)
     st.plotly_chart(
         fig,
-        use_container_width=True,
+        use_container_width=False,
         key="intersection_heatmap",
         config={"responsive": True},
     )
@@ -361,9 +368,13 @@ def _create_intersection_heatmap(
     max_val = float(np.nanmax(valid_values)) if len(valid_values) > 0 else 1.0
 
     import plotly.colors as pc
-
     base_colors = pc.get_colorscale(color_scheme)
-    if max_val > 0:
+    is_opportunity_matrix = len(valid_values) > 0 and np.all(valid_values == 0.0)
+
+    if is_opportunity_matrix:
+        dark_color = base_colors[-1][1]
+        custom_colorscale = [[0.0, dark_color], [1.0, dark_color]]
+    elif max_val > 0:
         custom_colorscale = [[0.0, "#FFFFFF"], [0.000001, base_colors[0][1]]] + [[v[0], v[1]] for v in base_colors[1:]]
     else:
         custom_colorscale = color_scheme
@@ -379,46 +390,58 @@ def _create_intersection_heatmap(
                 row_texts.append(f"{row_label} ∩ {col_label}: {int(val)} papers")
         hover_text.append(row_texts)
 
-    annotations = []
+    text_values = []
     for i in range(len(labels)):
+        row_text = []
         for j in range(len(labels)):
             val = raw_values[i][j]
             if val in [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE] or np.isnan(val):
-                continue
-            annotations.append(dict(
-                x=labels[j],
-                y=labels[i],
-                text=str(int(val)),
-                font=dict(size=9, color=_get_dynamic_text_color(val, max_val, color_scheme)),
-                showarrow=False,
-                xref="x",
-                yref="y",
-            ))
+                row_text.append("")
+            else:
+                row_text.append(str(int(val)))
+        text_values.append(row_text)
+
+    indices = list(range(len(labels)))
+
+
 
     fig = go.Figure(data=go.Heatmap(
         z=display_values,
-        x=labels,
-        y=labels,
+        x=indices,
+        y=indices,
         xgap=1,
         ygap=1,
+        text=text_values,
+        texttemplate="%{text}",
+        textfont=dict(size=8, family="Inter, sans-serif"),
         hovertext=hover_text,
         hoverinfo="text",
         colorscale=custom_colorscale,
         showscale=True,
-        colorbar=dict(title="Count"),
+        colorbar=dict(
+            title="Count",
+            thickness=15,
+            lenmode="fraction",
+            len=0.85,
+            yanchor="middle",
+            y=0.5
+        ),
         hoverongaps=False,
     ))
 
-    height = max(420, min(1400, len(labels) * 18 + 150))
+    height = max(450, min(950, len(labels) * 16 + 150))
+    width = height + 120
 
     fig.update_layout(
         height=height,
-        autosize=True,
+        width=width,
+        autosize=False,
         font=dict(family="Inter, sans-serif"),
-        annotations=annotations,
         xaxis=dict(
+            type="linear",
+            range=[-0.5, len(labels) - 0.5],
             tickmode="array",
-            tickvals=labels,
+            tickvals=indices,
             ticktext=labels,
             tickangle=45,
             side="bottom",
@@ -426,16 +449,17 @@ def _create_intersection_heatmap(
             automargin=True,
         ),
         yaxis=dict(
+            type="linear",
+            range=[len(labels) - 0.5, -0.5],
             tickmode="array",
-            tickvals=labels,
+            tickvals=indices,
             ticktext=labels,
-            autorange="reversed",
             tickfont=dict(size=9),
             automargin=True,
             scaleanchor="x",
             scaleratio=1,
         ),
-        margin=dict(l=140, r=24, t=12, b=96),
+        margin=dict(l=140, r=100, t=24, b=96),
         plot_bgcolor=COLORS["surface"],
         paper_bgcolor=COLORS["white"],
         uirevision="intersection-matrix",
@@ -582,7 +606,17 @@ def _render_manual_validation(
     dimension_map: dict,
 ):
     """Render the manual validation / fertility section."""
+    if "ratings_version" not in st.session_state:
+        st.session_state.ratings_version = 0
+
     st.markdown("### SECTION 2 — Rating Table / CSV Upload")
+
+
+
+    # Display success message if it exists in session state from previous rerun
+    if st.session_state.get("ratings_success_msg"):
+        st.success(st.session_state.ratings_success_msg)
+        del st.session_state.ratings_success_msg
 
     sub_up, sub_table = st.tabs(["CSV Upload", "Interactive Table"])
 
@@ -609,13 +643,14 @@ def _render_manual_validation(
             disabled=["Variant A", "Variant B"],
             hide_index=True,
             use_container_width=True,
-            key="fertility_editor_multi"
+            key=f"fertility_editor_multi_{st.session_state.ratings_version}"
         )
 
         c1, c2 = st.columns(2)
         if c1.button("Save Manual Ratings", type="primary"):
             validator.bulk_update(edited_df)
-            st.success("Ratings saved!")
+            st.session_state.ratings_version += 1
+            st.session_state.ratings_success_msg = "Ratings saved!"
             st.rerun()
 
         csv_template = edited_df.to_csv(index=False)
@@ -630,7 +665,8 @@ def _render_manual_validation(
                 up_df = pd.read_csv(uploaded_file)
                 if st.button("Process Uploaded CSV"):
                     validator.bulk_update(up_df)
-                    st.success("Ratings imported successfully!")
+                    st.session_state.ratings_version += 1
+                    st.session_state.ratings_success_msg = "Ratings imported successfully!"
                     st.rerun()
             except Exception as e:
                 st.error(f"Error parsing CSV: {e}")
@@ -641,7 +677,11 @@ def _render_manual_validation(
     alpha = validator.compute_reliability()
 
     c1, _ = st.columns([1, 2])
-    c1.metric("Krippendorff Alpha", alpha)
+    c1.metric(
+        "Krippendorff Alpha",
+        alpha,
+        help="Measures the agreement between different raters (authors) considering chance. 1.0 = perfect agreement, 0.0 = chance agreement."
+    )
 
     if alpha > 0.8:
         st.success("**Excellent agreement** (Alpha > 0.8)")
@@ -693,7 +733,7 @@ def _render_manual_validation(
     fig = _create_intersection_heatmap(opp_matrix, dimension_map, color_scheme)
     st.plotly_chart(
         fig,
-        use_container_width=True,
+        use_container_width=False,
         key="opportunity_heatmap",
         config={"responsive": True},
     )
@@ -712,9 +752,21 @@ def _render_manual_validation(
     ratio = opp_count / total_possible if total_possible > 0 else 0
 
     f1, f2, f3 = st.columns(3)
-    f1.metric("Total Possible Pairs", total_possible)
-    f2.metric("Research Opportunities", opp_count)
-    f3.metric("Fertility Ratio", f"{ratio:.3f}")
+    f1.metric(
+        "Total Possible Pairs",
+        total_possible,
+        help="Total number of valid cross-dimension pairs (excludes same-dimension combinations of the same concept)."
+    )
+    f2.metric(
+        "Research Opportunities",
+        opp_count,
+        help="Number of valid cross-dimension pairs with 0 papers that the authors rated as 'Relevant' (consensus)."
+    )
+    f3.metric(
+        "Fertility Ratio",
+        f"{ratio:.3f}",
+        help="Ratio of Research Opportunities to Total Possible Pairs (Opportunities / Total Possible)."
+    )
 
     if ratio > 0.5:
         st.success("Large unexplored research space (Ratio > 0.5)")
@@ -762,11 +814,17 @@ def _render_single_override(df: pd.DataFrame, computer: MatrixComputer):
             paper_ids,
             key="val_paper",
             format_func=_paper_option_label,
+            help="Select a paper to override its variant detection status."
         )
         if selected_paper and selected_paper in meta_map:
             st.caption(f"Filename: {meta_map[selected_paper].get('filename', '')}")
     with col2:
-        selected_variant = st.selectbox("Select Variant", variant_names, key="val_variant")
+        selected_variant = st.selectbox(
+            "Select Variant",
+            variant_names,
+            key="val_variant",
+            help="Select a variant to override its presence/absence in the selected paper."
+        )
 
     if selected_paper and selected_variant:
         current_value = bool(df.at[selected_paper, selected_variant])
@@ -785,10 +843,16 @@ def _render_single_override(df: pd.DataFrame, computer: MatrixComputer):
             "Variant is present in this paper",
             value=current_value,
             key="val_toggle",
+            help="Toggle whether this variant is marked as present (1) or absent (0) in the selected paper. This corrects automated NLP detection errors."
         )
 
         if new_value != current_value:
-            if st.button("Save Override", type="primary", key="save_single_override"):
+            if st.button(
+                "Save Override",
+                type="primary",
+                key="save_single_override",
+                help="Persist this single-variant override to manual_overrides.json and recompute the matrices."
+            ):
                 computer.set_override(selected_paper, selected_variant, new_value)
                 computer.apply_overrides_and_recompute()
                 _sync_session_state(computer)
@@ -838,14 +902,25 @@ def _render_pair_validation(df: pd.DataFrame, computer: MatrixComputer):
             paper_ids,
             key="pair_val_paper",
             format_func=_paper_option_label,
+            help="Select a paper to validate a pair of variants within."
         )
         if pair_paper and pair_paper in meta_map:
             st.caption(f"Filename: {meta_map[pair_paper].get('filename', '')}")
     with col2:
-        pair_va = st.selectbox("Variant A", variant_names, key="pair_val_va")
+        pair_va = st.selectbox(
+            "Variant A",
+            variant_names,
+            key="pair_val_va",
+            help="First variant of the pair you want to validate as co-occurring in the paper."
+        )
         if pair_va: st.caption(f"Dimension: {dimension_map.get(pair_va, '-')}")
     with col3:
-        pair_vb = st.selectbox("Variant B", variant_names, key="pair_val_vb")
+        pair_vb = st.selectbox(
+            "Variant B",
+            variant_names,
+            key="pair_val_vb",
+            help="Second variant of the pair you want to validate as co-occurring in the paper."
+        )
         if pair_vb: st.caption(f"Dimension: {dimension_map.get(pair_vb, '-')}")
 
     if pair_paper and pair_va and pair_vb:
@@ -856,7 +931,12 @@ def _render_pair_validation(df: pd.DataFrame, computer: MatrixComputer):
         else:
             va_present = bool(df.at[pair_paper, pair_va])
             vb_present = bool(df.at[pair_paper, pair_vb])
-            if st.button(f"Save Pair Validation", type="primary", key="save_pair_override"):
+            if st.button(
+                "Save Pair Validation",
+                type="primary",
+                key="save_pair_override",
+                help="Force both Variant A and Variant B to be Present (1) in this paper. This updates the intersection matrix and increases the pair count."
+            ):
                 computer.set_pair_override(pair_paper, pair_va, pair_vb)
                 computer.apply_overrides_and_recompute()
                 _sync_session_state(computer)
