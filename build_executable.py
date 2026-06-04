@@ -24,6 +24,15 @@ def clean_build_dirs():
 
 def run_pyinstaller():
     """Runs the PyInstaller compilation command."""
+    # Ensure source data directory structure exists so PyInstaller doesn't crash
+    for d in ["data/papers", "data/variants", "data/cache", "data/output"]:
+        Path(d).mkdir(parents=True, exist_ok=True)
+        # Ensure default variants.json exists
+        var_json = Path("data/variants/variants.json")
+        if not var_json.exists():
+            with open(var_json, "w", encoding="utf-8") as f:
+                f.write('{"dimensions": {}}')
+
     print("🔨 Starting PyInstaller bundle compilation (this may take a while)...")
 
     version_info_content = """VSVersionInfo(
