@@ -1004,7 +1004,7 @@ def _render_download_results():
     cols = st.columns(min(len(output_files), 4))
     for i, file_path in enumerate(sorted(output_files)):
         with cols[i % len(cols)]:
-            with open(file_path, "r") as f:
+            with open(file_path, "r", encoding="utf-8", errors="replace") as f:
                 csv_data = f.read()
             st.download_button(
                 label=file_path.name,
