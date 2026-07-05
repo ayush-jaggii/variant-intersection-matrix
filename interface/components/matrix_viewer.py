@@ -933,7 +933,16 @@ def _render_detection_overrides(df: pd.DataFrame, computer: MatrixComputer):
     sections.
     """
     st.markdown(sub_header("edit", "Detection Overrides"), unsafe_allow_html=True)
-    st.caption("Adjust individual detections or confirm variant pairs.")
+    
+    st.info(
+        "💡 **Detection Overrides**\n\n"
+        "Automated text extraction from PDF files can occasionally introduce minor discrepancies—such as "
+        "detecting variant synonyms within the references/bibliography section, or missing terms due to hyphenation "
+        "across line breaks and text embedded in figures. "
+        "Use this section to manually correct any false positives or false negatives. All overrides will immediately update the "
+        "intersection matrices and reliability metrics, and are saved permanently."
+    )
+
     _render_single_override(df, computer)
     st.divider()
     _render_pair_validation(df, computer)
