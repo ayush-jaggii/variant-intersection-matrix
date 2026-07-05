@@ -433,7 +433,7 @@ def _show_results_summary():
     col1.metric("Papers Analyzed", stats.get("total_papers", 0))
     col2.metric("Variants Tracked", stats.get("total_variants", 0))
     col3.metric("Total Detections", stats.get("total_detections", 0))
-    col4.metric("Research Gaps", stats.get("research_gaps", 0))
+    col4.metric("Research Opportunities", stats.get("research_gaps", 0))
 
     col5, col6, col7, col8 = st.columns(4)
     col5.metric("Avg Variants/Paper", f"{stats.get('avg_variants_per_paper', 0):.1f}")

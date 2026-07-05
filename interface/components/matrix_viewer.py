@@ -95,7 +95,7 @@ def render_matrix_viewer():
     tab_intersection, tab_paper_variant, tab_gaps, tab_overrides, tab_validation, tab_download = st.tabs([
         "Intersection Matrix",
         "Paper x Variant Matrix",
-        "Research Gaps",
+        "Research Opportunities",
         "Detection Overrides",
         "Manual Validation & Research Fertility",
         "Download Results",
@@ -351,6 +351,9 @@ def _create_intersection_heatmap(
     df: pd.DataFrame,
     dimension_map: dict,
     color_scheme: str = "Blues",
+    text_values: Optional[List[List[str]]] = None,
+    hover_text: Optional[List[List[str]]] = None,
+    is_opportunity: bool = False,
 ) -> go.Figure:
     """
     Create a Plotly heatmap for the intersection matrix with dynamic text colors and selectable palettes.
@@ -365,41 +368,73 @@ def _create_intersection_heatmap(
     display_values[display_values == UPPER_TRIANGLE_VALUE] = np.nan
 
     valid_values = raw_values[~np.isin(raw_values, [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE])]
-    max_val = float(np.nanmax(valid_values)) if len(valid_values) > 0 else 1.0
 
     import plotly.colors as pc
     base_colors = pc.get_colorscale(color_scheme)
-    is_opportunity_matrix = len(valid_values) > 0 and np.all(valid_values == 0.0)
 
-    if is_opportunity_matrix:
+    if is_opportunity:
+        valid_counts = raw_values[~np.isin(raw_values, [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE, 0.0, 0.25, 0.5, 0.75])]
+        max_val = max(2.0, float(np.nanmax(valid_counts))) if len(valid_counts) > 0 else 2.0
+        
         dark_color = base_colors[-1][1]
-        custom_colorscale = [[0.0, dark_color], [1.0, dark_color]]
-    elif max_val > 0:
-        custom_colorscale = [[0.0, "#FFFFFF"], [0.000001, base_colors[0][1]]] + [[v[0], v[1]] for v in base_colors[1:]]
+        light_color = base_colors[0][1]
+        
+        custom_colorscale = [
+            [0.0, dark_color],                          # Gap (0.0): Darkest color
+            [0.05 / max_val, dark_color],
+            [0.1 / max_val, "#FFFFFF"],                 # N, ?, E: White
+            [0.9 / max_val, "#FFFFFF"],                 # N, ?, E: White
+            [0.99999 / max_val, "#FFFFFF"],
+            [1.0 / max_val, light_color],                # Count = 1: Lightest color
+        ]
+        # Add the rest of the colorscale from 1.0 to max_val
+        for v in base_colors:
+            normalized_val = (1.0 + v[0] * (max_val - 1.0)) / max_val
+            custom_colorscale.append([normalized_val, v[1]])
     else:
-        custom_colorscale = color_scheme
+        max_val = float(np.nanmax(valid_values)) if len(valid_values) > 0 else 1.0
+        is_opportunity_matrix = len(valid_values) > 0 and np.all(valid_values == 0.0)
+        if is_opportunity_matrix:
+            dark_color = base_colors[-1][1]
+            custom_colorscale = [[0.0, dark_color], [1.0, dark_color]]
+        elif max_val > 0:
+            custom_colorscale = [[0.0, "#FFFFFF"], [0.000001, base_colors[0][1]]] + [[v[0], v[1]] for v in base_colors[1:]]
+        else:
+            custom_colorscale = color_scheme
 
-    hover_text = []
-    for i, row_label in enumerate(labels):
-        row_texts = []
-        for j, col_label in enumerate(labels):
-            val = raw_values[i][j]
-            if val in [SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE, EXCLUDED_PAIR_VALUE] or np.isnan(val):
-                row_texts.append("")
-            else:
-                row_texts.append(f"{row_label} ∩ {col_label}: {int(val)} papers")
-        hover_text.append(row_texts)
+    # Tooltip / Hover text
+    if hover_text is None:
+        hover_text = []
+        for i, row_label in enumerate(labels):
+            row_texts = []
+            for j, col_label in enumerate(labels):
+                val = raw_values[i][j]
+                if val in [SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE, EXCLUDED_PAIR_VALUE] or np.isnan(val):
+                    row_texts.append("")
+                elif is_opportunity and val == 0.0:
+                    row_texts.append(f"{row_label} ∩ {col_label}: 0 papers (Gap / Opportunity)")
+                elif is_opportunity and val == 0.25:
+                    row_texts.append(f"{row_label} ∩ {col_label}: 0 papers (Not Relevant)")
+                elif is_opportunity and val == 0.5:
+                    row_texts.append(f"{row_label} ∩ {col_label}: 0 papers (Unresolved)")
+                elif is_opportunity and val == 0.75:
+                    row_texts.append(f"{row_label} ∩ {col_label}: papers exist (Not Relevant / Error)")
+                else:
+                    row_texts.append(f"{row_label} ∩ {col_label}: {int(val)} papers")
+            hover_text.append(row_texts)
 
-    text_values = []
-    for i in range(len(labels)):
-        row_text = []
-        for j in range(len(labels)):
-            val = raw_values[i][j]
-            if val in [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE] or np.isnan(val):
-                row_text.append("")
-            else:
-                row_text.append(str(int(val)))
-        text_values.append(row_text)
+    # Cell display text
+    if text_values is None:
+        text_values = []
+        for i in range(len(labels)):
+            row_text = []
+            for j in range(len(labels)):
+                val = raw_values[i][j]
+                if val in [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE] or np.isnan(val):
+                    row_text.append("")
+                else:
+                    row_text.append(str(int(val)))
+            text_values.append(row_text)
 
     indices = list(range(len(labels)))
 
@@ -552,8 +587,8 @@ def _render_paper_variant_matrix(df: pd.DataFrame):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _render_research_gaps(computer: MatrixComputer, dimension_map: dict):
-    """Show variant pairs with zero intersection (research gaps)."""
-    st.markdown(sub_header("psychology", "Research Gaps"), unsafe_allow_html=True)
+    """Show variant pairs with zero intersection (research opportunities)."""
+    st.markdown(sub_header("psychology", "Research Opportunities"), unsafe_allow_html=True)
     st.caption(
         "These **cross-dimension** variant pairs have no papers that discuss "
         "both variants. Same-dimension pairs are excluded by design."
@@ -562,10 +597,10 @@ def _render_research_gaps(computer: MatrixComputer, dimension_map: dict):
     gaps = computer.get_research_gaps()
 
     if not gaps:
-        st.success("No research gaps found - all cross-dimension variant pairs are covered!")
+        st.success("No research opportunities found - all cross-dimension variant pairs are covered!")
         return
 
-    st.metric("Total Research Gaps", len(gaps))
+    st.metric("Total Research Opportunities", len(gaps))
 
     # Filter by variant
     all_gap_variants = sorted(set(v for pair in gaps for v in pair))
@@ -583,7 +618,7 @@ def _render_research_gaps(computer: MatrixComputer, dimension_map: dict):
         ]
 
     if not filtered_gaps:
-        st.success("No gaps match the current filter.")
+        st.success("No opportunities match the current filter.")
         return
 
     gap_df = pd.DataFrame(filtered_gaps, columns=["Variant A", "Variant B"])
@@ -592,9 +627,9 @@ def _render_research_gaps(computer: MatrixComputer, dimension_map: dict):
     st.dataframe(gap_df, use_container_width=True, height=400)
 
     st.download_button(
-        "Download Research Gaps CSV",
+        "Download Research Opportunities CSV",
         data=gap_df.to_csv(index=False),
-        file_name="research_gaps.csv",
+        file_name="research_opportunities.csv",
         mime="text/csv",
     )
 
@@ -671,6 +706,12 @@ def _render_manual_validation(
             except Exception as e:
                 st.error(f"Error parsing CSV: {e}")
 
+    # Check if there are any active ratings before showing analysis and the Fertility Matrix
+    has_any_ratings = any(any(r in ["R", "N"] for r in r_dict.values()) for r_dict in validator.ratings.values())
+    if not has_any_ratings:
+        st.info("💡 **No ratings detected yet.** Please import ratings from a CSV template (in Section 2) or rate pairs using the Manual Validation drawer above to initialize the Fertility Matrix and Reliability analysis.")
+        return
+
     st.divider()
 
     st.markdown("### SECTION 3 — Inter-Rater Reliability")
@@ -694,7 +735,7 @@ def _render_manual_validation(
 
     st.divider()
 
-    st.markdown("### SECTION 4 — Opportunity Matrix")
+    st.markdown("### SECTION 4 — Fertility Matrix")
     st.caption("Showing pairs marked 'Relevant' (majority) but with 0 existing papers.")
 
     results = []
@@ -717,20 +758,61 @@ def _render_manual_validation(
     res_df = pd.DataFrame(results)
 
     opp_matrix = intersection_df.copy()
+    text_values = []
+    hover_text = []
+    
     for i, r_label in enumerate(intersection_df.index):
+        row_text = []
+        row_hover = []
         for j, c_label in enumerate(intersection_df.columns):
             if j >= i:
+                row_text.append("")
+                row_hover.append("")
                 continue
-
+                
+            if computer.is_same_dimension_pair(r_label, c_label):
+                opp_matrix.iloc[i, j] = EXCLUDED_PAIR_VALUE
+                row_text.append("")
+                row_hover.append("")
+                continue
+                
             final_rating = validator.get_majority_rating(r_label, c_label)
             count = computer.get_pair_intersection_count(r_label, c_label)
-            if final_rating == "R" and count == 0:
-                opp_matrix.iloc[i, j] = 0.0
+            
+            if count > 0:
+                if final_rating == "N":
+                    opp_matrix.iloc[i, j] = 0.75
+                    row_text.append("E")
+                    row_hover.append(f"{r_label} ∩ {c_label}: {int(count)} papers (Not Relevant / Error)")
+                else:
+                    opp_matrix.iloc[i, j] = float(count)
+                    row_text.append(str(int(count)))
+                    row_hover.append(f"{r_label} ∩ {c_label}: {int(count)} papers")
             else:
-                opp_matrix.iloc[i, j] = np.nan
+                if final_rating == "R":
+                    opp_matrix.iloc[i, j] = 0.0
+                    row_text.append("G")
+                    row_hover.append(f"{r_label} ∩ {c_label}: 0 papers (Gap / Opportunity)")
+                elif final_rating == "N":
+                    opp_matrix.iloc[i, j] = 0.25
+                    row_text.append("N")
+                    row_hover.append(f"{r_label} ∩ {c_label}: 0 papers (Not Relevant)")
+                else: # final_rating == "?"
+                    opp_matrix.iloc[i, j] = 0.5
+                    row_text.append("?")
+                    row_hover.append(f"{r_label} ∩ {c_label}: 0 papers (Unresolved)")
+        text_values.append(row_text)
+        hover_text.append(row_hover)
 
     color_scheme = st.session_state.get("heatmap_color_scheme", "Blues")
-    fig = _create_intersection_heatmap(opp_matrix, dimension_map, color_scheme)
+    fig = _create_intersection_heatmap(
+        opp_matrix, 
+        dimension_map, 
+        color_scheme, 
+        text_values=text_values, 
+        hover_text=hover_text,
+        is_opportunity=True
+    )
     st.plotly_chart(
         fig,
         use_container_width=False,
@@ -738,10 +820,66 @@ def _render_manual_validation(
         config={"responsive": True},
     )
 
+    # Image download buttons for Fertility Matrix
+    st.markdown("**Download Fertility Matrix Visualization**", unsafe_allow_html=True)
+    
+    # Serialize text_values for a robust cache key
+    text_tuple = tuple(tuple(row) for row in text_values)
+    matrix_hash_opp = str(hash((opp_matrix.values.tobytes(), text_tuple))) + "_" + color_scheme
+    state_key_opp = f"heatmap_export_opp_{matrix_hash_opp}"
+
+    if st.session_state.get(state_key_opp) is None:
+        if st.button("Prepare Fertility Matrix Images for Download", help="Generate high-resolution PNG and SVG files."):
+            with st.spinner("Generating imagery..."):
+                try:
+                    png_bytes = _generate_static_heatmap(
+                        opp_matrix, 
+                        dimension_map, 
+                        color_scheme, 
+                        format="png", 
+                        text_values=text_values, 
+                        is_opportunity=True
+                    )
+                    svg_bytes = _generate_static_heatmap(
+                        opp_matrix, 
+                        dimension_map, 
+                        color_scheme, 
+                        format="svg", 
+                        text_values=text_values, 
+                        is_opportunity=True
+                    )
+                    st.session_state[state_key_opp] = {"png": png_bytes, "svg": svg_bytes}
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Image generation failed: {e}")
+    else:
+        export_data_opp = st.session_state[state_key_opp]
+        col_png_opp, col_svg_opp, _ = st.columns([1, 1, 4])
+        col_png_opp.download_button("Download PNG Image", data=export_data_opp["png"], file_name="fertility_matrix.png", mime="image/png")
+        col_svg_opp.download_button("Download SVG Image", data=export_data_opp["svg"], file_name="fertility_matrix.svg", mime="image/svg+xml")
+
+    # Format the downloadable CSV nicely for the user
+    export_opp_df = opp_matrix.copy().astype(object)
+    for i, r_label in enumerate(opp_matrix.index):
+        for j, c_label in enumerate(opp_matrix.columns):
+            val = opp_matrix.iloc[i, j]
+            if val == EXCLUDED_PAIR_VALUE or val == SAME_VARIANT_VALUE or val == UPPER_TRIANGLE_VALUE or pd.isna(val):
+                export_opp_df.iloc[i, j] = ""
+            elif val == 0.25:
+                export_opp_df.iloc[i, j] = "N"
+            elif val == 0.5:
+                export_opp_df.iloc[i, j] = "?"
+            elif val == 0.75:
+                export_opp_df.iloc[i, j] = "E"
+            elif val == 0.0:
+                export_opp_df.iloc[i, j] = "G"
+            else:
+                export_opp_df.iloc[i, j] = str(int(val))
+
     st.download_button(
-        "Download Opportunity Matrix CSV",
-        data=opp_matrix.to_csv(),
-        file_name="opportunity_matrix.csv",
+        "Download Fertility Matrix CSV",
+        data=export_opp_df.to_csv(),
+        file_name="fertility_matrix.csv",
     )
 
     st.divider()
@@ -1031,12 +1169,24 @@ def _render_download_results():
                 st.markdown(f"**{pid}** -> {fname}")
 
 @st.cache_data(show_spinner=False)
-def _generate_static_heatmap(df: pd.DataFrame, dimension_map: dict, color_scheme: str = "Blues", format: str = "png") -> bytes:
+def _generate_static_heatmap(
+    df: pd.DataFrame,
+    dimension_map: dict,
+    color_scheme: str = "Blues",
+    format: str = "png",
+    text_values: Optional[List[List[str]]] = None,
+    is_opportunity: bool = False,
+) -> bytes:
     """
     Generate a static matplotlib heatmap matching the visual style of Plotly.
     Zeroes are filtered out to render completely white and background-free constraints.
     Uses standard seaborn palettes dynamically linked.
     """
+    import copy
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    import numpy as np
+
     labels = list(df.columns)
     raw_values = df.values.copy().astype(float)
 
@@ -1046,10 +1196,12 @@ def _generate_static_heatmap(df: pd.DataFrame, dimension_map: dict, color_scheme
     display_values[display_values == UPPER_TRIANGLE_VALUE] = np.nan
 
     valid_values = raw_values[~np.isin(raw_values, [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE])]
-    max_val = float(np.nanmax(valid_values)) if len(valid_values) > 0 else 1.0
-
-    import copy
-    import matplotlib.pyplot as plt
+    
+    if is_opportunity:
+        valid_counts = raw_values[~np.isin(raw_values, [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE, 0.0, 0.25, 0.5, 0.75])]
+        max_val = max(2.0, float(np.nanmax(valid_counts))) if len(valid_counts) > 0 else 2.0
+    else:
+        max_val = float(np.nanmax(valid_values)) if len(valid_values) > 0 else 1.0
 
     # Create the figure
     size = max(10, len(labels) * 0.4)
@@ -1060,10 +1212,13 @@ def _generate_static_heatmap(df: pd.DataFrame, dimension_map: dict, color_scheme
     for i in range(len(labels)):
         for j in range(len(labels)):
             val = raw_values[i][j]
-            if val == EXCLUDED_PAIR_VALUE: annot[i, j] = ""
-            elif val == SAME_VARIANT_VALUE: annot[i, j] = ""
-            elif val == UPPER_TRIANGLE_VALUE: annot[i, j] = ""
-            else: annot[i, j] = str(int(val))
+            if val in [EXCLUDED_PAIR_VALUE, SAME_VARIANT_VALUE, UPPER_TRIANGLE_VALUE] or np.isnan(val):
+                annot[i, j] = ""
+            else:
+                if text_values is not None:
+                    annot[i, j] = text_values[i][j]
+                else:
+                    annot[i, j] = str(int(val))
     
     # We pass the NaNs to matplotlib to show them blank, but we need the background color
     ax.set_facecolor(COLORS["surface"] if "surface" in COLORS else "#FFFFFF")
@@ -1079,12 +1234,35 @@ def _generate_static_heatmap(df: pd.DataFrame, dimension_map: dict, color_scheme
     mpl_cmap = cmap_mapping.get(color_scheme, color_scheme)
     
     base_cmap = copy.copy(plt.get_cmap(mpl_cmap))
-    base_cmap.set_under('#FFFFFF')
+    
+    if is_opportunity:
+        dark_color = base_cmap(1.0)
+        light_color = base_cmap(0.0)
+        
+        color_stops = [
+            (0.0, dark_color),
+            (0.05 / max_val, dark_color),
+            (0.1 / max_val, (1.0, 1.0, 1.0, 1.0)), # white
+            (0.9 / max_val, (1.0, 1.0, 1.0, 1.0)), # white
+            (0.99999 / max_val, (1.0, 1.0, 1.0, 1.0)),  # white
+            (1.0 / max_val, light_color),
+        ]
+        # Add the remaining stops from 1.0/max_val to 1.0
+        for x in np.linspace(0.0, 1.0, 100):
+            val = (1.0 + x * (max_val - 1.0)) / max_val
+            color_stops.append((val, base_cmap(x)))
+            
+        color_stops = sorted(color_stops, key=lambda s: s[0])
+        final_cmap = mcolors.LinearSegmentedColormap.from_list("custom_opp", color_stops, N=4096)
+        final_cmap.set_under('#FFFFFF')
+    else:
+        final_cmap = base_cmap
+        final_cmap.set_under('#FFFFFF')
 
-    # Plot seaborn heatmap utilizing matplotlib's literal standard string palette maps.
+    # Plot seaborn heatmap utilizing matplotlib's standard string palette maps.
     sns.heatmap(
         display_values, 
-        cmap=base_cmap,
+        cmap=final_cmap,
         annot=annot,
         fmt="",
         cbar_kws={'label': 'Count'},
@@ -1092,8 +1270,8 @@ def _generate_static_heatmap(df: pd.DataFrame, dimension_map: dict, color_scheme
         yticklabels=labels,
         ax=ax,
         mask=np.isnan(display_values),
-        vmin=0.001, 
-        vmax=max_val if max_val > 0 else 1,
+        vmin=0.0 if is_opportunity else 0.001, 
+        vmax=max_val,
         square=True,
         linewidths=1,
         linecolor='#E0E0E0'
