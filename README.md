@@ -1,6 +1,6 @@
 # Variant Intersection Matrix Analyzer (VIM Analyzer)
 
-A professional research analysis tool for identifying variant intersections, systematic research gaps, and opportunity spaces in academic literature datasets.
+A professional research analysis tool for identifying variant intersections, systematic research opportunities, and fertility spaces in academic literature datasets.
 
 ---
 
@@ -21,9 +21,9 @@ The VIM Analyzer follows a structured analytical pipeline to ensure reproducibil
 
 ### 1. Paper Processing
 The system ingests papers in PDF or TXT format. The processing involves:
-- **PDF Text Extraction**: High-fidelity extraction of textual content.
-- **Keyword & Variant Detection**: Substring matching against a dictionary of variants and their synonyms (alternate names).
-- **Normalization**: Text is cleaned (Unicode normalization, lowercase, noise removal) to ensure matching accuracy.
+- **PDF Text Extraction**: High-fidelity extraction of textual content using PyMuPDF.
+- **Keyword & Variant Detection**: Substring matching against a dictionary of variants and their synonyms (alternate names) using case-insensitive regular expressions with word boundary checks.
+- **Normalization**: Text is cleaned (Unicode NFKD normalization, lowercase, hyphen/underscore to space replacement, non-alphanumeric stripping) to ensure matching accuracy.
 
 ### 2. Paper × Variant Binary Matrix
 Each processed paper is converted into a binary representation:
@@ -36,7 +36,7 @@ The system computes pairwise intersections between variants to identify co-occur
 - **Intersection Count**: Computed as the number of papers containing both variants in a pair.
 - **Structural Rules**:
     - **Diagonal**: Excluded (self-comparison).
-    - **Intra-Dimension Pairs**: Excluded (variants belonging to the same category are treated as mutually exclusive).
+    - **Intra-Dimension Pairs**: Excluded (variants belonging to the same category/dimension are treated as mutually exclusive).
     - **Lower Triangular Matrix**: Valid intersections are displayed in the lower triangle for clarity.
 
 ### 4. Heatmap Visualization
@@ -44,48 +44,52 @@ The results are presented as an interactive heatmap with the following features:
 - **Triangular Display**: Focuses on unique pairwise relationships.
 - **Numeric Annotations**: Direct display of intersection counts.
 - **Dynamic Scaling**: The color intensity adjusts based on the maximum intersection count.
-- **Customization**: Support for multiple color palettes (e.g., Viridis, Blues, Magma).
-- **Image Export**: High-resolution PNG/JPEG download for publication.
+- **Customization**: Support for multiple color palettes (e.g., Viridis, Blues, Magma, Greys).
+- **Image Export**: High-resolution PNG/SVG download for publication.
 
 ### 5. CSV Export
 Standardized data formats are provided for external analysis:
 - **Variant Intersection Matrix (CSV)**: Preserves the full structural data, including excluded markers.
 - **Pair Details (CSV)**: A flat file listing every valid pair, its count, and the specific papers (IDs) that form the intersection.
 
-### 6. Manual Validation Matrix
-Domain experts can refine the analytical results through a manual validation layer:
+### 6. Manual Validation Layer
+Domain experts can refine the analytical results through a manual validation layer for variant pairs:
 - **R (Relevant)**: The relationship is conceptually meaningful.
 - **N (Not Relevant)**: The relationship is logically or theoretically invalid.
-- **? (Uncertain)**: Requires further investigation.
+- **? (Unrated / Uncertain)**: Default state or requires further discussion.
 
-### 7. Fertility Analysis
-The **Research Fertility Ratio** quantifies the "promise" of a research area by comparing viable opportunities to the total theoretically possible combinations.
-- **Total Possible Pairs**: Calculated as `N(N-1) / 2`.
-- **Viable Pairs**: Combinations not marked as `N` or `?`.
-- **Research Fertility Ratio**: `Viable_Pairs / Total_Possible_Pairs`.
-
-### 8. Multi-Author Validation
-For rigorous academic research, the system supports collaborative rating:
-- Individual researchers can upload their own validation CSVs.
-- The system aggregates multiple rater matrices.
-- Majority voting logic is used to determine final consensus ratings.
-
-### 9. Inter-Rater Reliability
-To validate the consistency of manual classifications, the tool computes **Krippendorff’s Alpha** (Nominal):
+### 7. Inter-Rater Reliability
+To validate the consistency of manual classifications, the tool computes **Krippendorff’s Alpha** (Nominal) by treating `"?"` as missing data:
+- Calculated over active categories (`R` and `N` only) using a 2x2 nominal coincidence matrix.
+- Pairs with fewer than 2 active ratings are excluded to prevent distortion.
 - **> 0.80**: Strong agreement.
 - **0.70 - 0.80**: Acceptable reliability.
-- **< 0.67**: Weak reliability.
-This ensures that the resulting research gap analysis is statistically sound and suitable for peer-reviewed publication.
+- **< 0.70**: Weak reliability.
+This ensures that the inter-rater reliability analysis is statistically sound and suitable for peer-reviewed publication.
+
+### 8. Combined Fertility Matrix (G, N, ?, E Outcomes)
+A final combined view that merges literature co-occurrence counts and validation consensus ratings. Each pair is classified into one of five outcomes:
+- **`G` (Gap / Opportunity)**: Conceptually relevant (`R`) but `0` papers in the literature. Colored dark blue.
+- **`N` (Not Relevant)**: Conceptually not relevant (`N`) and `0` papers. Colored white.
+- **`?` (Unresolved)**: Unresolved/Tied (`?`) consensus rating and `0` papers. Colored white.
+- **`E` (Error / Discrepancy)**: Conceptually not relevant (`N`) but `count > 0` papers exist. Colored white.
+- **`Count`**: Conceptually relevant (`R`) or unresolved (`?`) and `count > 0` papers exist. Colored by literature density.
+
+### 9. Research Fertility Ratio
+The **Research Fertility Ratio** quantifies the unused opportunity density within the morphological space:
+- **Total Possible Pairs**: Total valid cross-dimension variant pairs (excluding same-category combinations).
+- **Research Opportunities**: Pairs rated **"R"** (Relevant) by consensus with 0 papers.
+- **Fertility Ratio**: `Research_Opportunities / Total_Possible_Pairs`.
 
 ---
 
 ## Features
 - **Automatic Variant Detection**: High-speed processing of large document sets.
 - **Inter-Dimension Filtering**: Automatically filters out invalid intra-category pairings.
-- **Research Gap Identification**: Instantly highlights 0-value intersections in relevant spaces.
+- **Research Opportunity Identification**: Instantly highlights conceptual gaps (`G`) in relevant spaces.
 - **Expert Validation**: Layered manual verification for domain-specific accuracy.
-- **Reliability Metrics**: Built-in statistical analysis for multi-author studies.
-- **Export Ready**: Professional visualizations and CSV data for seamless integration into papers.
+- **Reliability Metrics**: Built-in Krippendorff's Alpha analysis for multi-author studies.
+- **Export Ready**: Professional PNG/SVG visualizations and CSV data for publications.
 
 ---
 
